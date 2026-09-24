@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ippt-tracker"
+version = "0.1.0"
+description = "Participant-calibrated, explainable push-up and sit-up assessment with YOLO26 Pose."
+readme = "PROJECT_OVERVIEW.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "numpy>=1.26,<3",
+    "opencv-python>=4.10,<5",
+    "PyYAML>=6.0,<7",
+    "ultralytics>=8.4.0,<9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<10",
+    "ruff>=0.8,<1",
+]
+
+[project.scripts]
+ippt-track = "ippt_tracker.run:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

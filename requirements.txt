@@ -1,0 +1,2 @@
+# Runtime dependencies. YOLO26 pose weights download automatically on first inference.
+-e .

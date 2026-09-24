@@ -1,0 +1,20 @@
+# V1 research/prototype parameters. These are deliberately not claimed to be
+# official IPPT rules: tune and validate them against human-assessor labels.
+session:
+  calibration_frames: 45
+  min_pose_confidence: 0.35
+  smoothing_window: 5
+
+pushup:
+  # The upper pose is participant-calibrated. Values below are safety bounds.
+  min_extension_angle_degrees: 155.0
+  bottom_elbow_angle_degrees: 105.0
+  attempt_elbow_angle_degrees: 140.0
+  min_normalized_shoulder_drop: 0.30
+  max_trunk_deviation_degrees: 22.0
+
+situp:
+  # Flexion is measured relative to the participant's calibrated down posture.
+  min_relative_hip_flexion: 0.35
+  attempt_relative_hip_flexion: 0.15
+  down_relative_hip_flexion: 0.10
