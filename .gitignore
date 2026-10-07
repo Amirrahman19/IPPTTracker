@@ -1,28 +1,17 @@
-# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-.venv/
 
-# Local data, model weights, and experiment artefacts
+# Large or participant-identifying artefacts never go in the project folder
+# (this folder syncs to OneDrive). Datasets and models live under IPPT_DATA_DIR.
 data/raw/
-data/processed/
-data/runs/
-models/
+data/interim/
 runs/
-.ultralytics/
-Ultralytics/
-*.pt
-*.onnx
+*.task
 *.mp4
-*.avi
 *.mov
-
-# Editors and OS files
-.vscode/
-.idea/
-Thumbs.db
-.DS_Store
+*.npz
+.env
+kaggle.json
+*.avi

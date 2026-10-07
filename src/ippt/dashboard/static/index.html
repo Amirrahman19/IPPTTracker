@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPPT Tracker</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --line: #e1e4ea; --text: #1b1f27; --muted: #667085;
+    --accent: #2563eb; --near: #16a34a; --far: #94a3b8; --warn: #d97706; --danger: #dc2626;
+    --ok: #16a34a; --fail: #dc2626; --badge-ok: #dcfce7; --badge-fail: #fef2f2;
+    --s-elbow: #2563eb; --s-hip: #d946ef; --s-knee: #f59e0b; --s-body: #16a34a;
+    --gold: #eab308; --silver: #9ca3af; --pass: #22c55e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1218; --panel: #171b23; --line: #272d38; --text: #e6e9ef; --muted: #8a93a3;
+      --accent: #60a5fa; --near: #4ade80; --far: #64748b; --warn: #fbbf24; --danger: #ef4444;
+      --ok: #4ade80; --fail: #f87171; --badge-ok: #14532d; --badge-fail: #450a0a;
+      --s-elbow: #60a5fa; --s-hip: #e879f9; --s-knee: #fbbf24; --s-body: #4ade80;
+      --gold: #facc15; --silver: #d1d5db; --pass: #4ade80;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218; --panel: #171b23; --line: #272d38; --text: #e6e9ef; --muted: #8a93a3;
+    --accent: #60a5fa; --near: #4ade80; --far: #64748b; --warn: #fbbf24; --danger: #ef4444;
+    --ok: #4ade80; --fail: #f87171; --badge-ok: #14532d; --badge-fail: #450a0a;
+    --s-elbow: #60a5fa; --s-hip: #e879f9; --s-knee: #fbbf24; --s-body: #4ade80;
+    --gold: #facc15; --silver: #d1d5db; --pass: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+  /* layout */
+  .app { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100%; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  aside header { padding: 14px 14px 8px; }
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .01em; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .filters { display: flex; gap: 5px; padding: 0 14px 8px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); background: transparent; color: var(--text); border-radius: 999px; padding: 3px 10px; cursor: pointer; font: inherit; font-size: 12px; transition: .15s; }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #search { margin: 0 14px 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+  #list { overflow: auto; flex: 1; padding: 0 6px 12px; }
+  .grp { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 10px 8px 4px; }
+  .item { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; padding: 5px 8px; border-radius: 6px; border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .item:hover { background: var(--bg); }
+  .item[aria-current="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .item span:last-child { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .upload-area { margin: 0 14px 8px; padding: 14px; border: 2px dashed var(--line); border-radius: 10px; text-align: center; cursor: pointer; transition: .15s; }
+  .upload-area:hover, .upload-area.drag { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .upload-area input { display: none; }
+  .upload-area p { margin: 0; font-size: 12px; color: var(--muted); }
+
+  /* main */
+  main { overflow: auto; padding: 16px; min-width: 0; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 14px; align-items: start; max-width: 1500px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .card-title { font-weight: 600; font-size: 13px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .col { display: flex; flex-direction: column; gap: 14px; }
+
+  /* video stage */
+  .stage { position: relative; width: 100%; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 9; max-height: 68vh; margin: 0 auto; }
+  .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .stage canvas { pointer-events: none; }
+  #msg { position: absolute; left: 10px; top: 10px; background: rgba(0,0,0,.65); color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; max-width: 90%; }
+
+  /* controls */
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; font-size: 13px; }
+  .bar label { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
+  .bar select, .bar input[type="number"] { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
+  .bar input[type="number"] { width: 60px; }
+  .title { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+  .title b { font-size: 15px; word-break: break-all; }
+  .tags { color: var(--muted); font-size: 12px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+  /* readouts */
+  .read { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .read div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  .read small { color: var(--muted); display: flex; align-items: center; gap: 5px; font-size: 12px; }
+  .read i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .read output { font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .read output em { font-size: 13px; color: var(--muted); font-style: normal; font-weight: 400; }
+
+  /* chart */
+  #chart { width: 100%; height: 170px; display: block; cursor: pointer; }
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 12px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .stats b { color: var(--text); font-weight: 600; }
+
+  /* analysis panel */
+  .analyze-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+  .analyze-bar label { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
+  .analyze-bar select, .analyze-bar input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
+  .analyze-bar input[type="number"] { width: 60px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 16px; border-radius: 8px; border: 0; font: inherit; font-weight: 600; cursor: pointer; transition: .15s; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { filter: brightness(1.1); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* score card */
+  .score-box { text-align: center; padding: 16px; }
+  .score-big { font-size: 48px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+  .score-max { font-size: 18px; color: var(--muted); font-weight: 400; }
+  .score-label { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .tier { display: inline-block; padding: 3px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; margin-top: 8px; }
+  .tier-gold { background: color-mix(in srgb, var(--gold) 20%, transparent); color: var(--gold); }
+  .tier-silver { background: color-mix(in srgb, var(--silver) 20%, transparent); color: var(--silver); }
+  .tier-pass { background: color-mix(in srgb, var(--pass) 15%, transparent); color: var(--pass); }
+  .tier-fail { background: var(--badge-fail); color: var(--fail); }
+
+  /* rep summary */
+  .rep-summary { display: flex; gap: 16px; justify-content: center; margin-bottom: 12px; }
+  .rep-summary div { text-align: center; }
+  .rep-summary .num { font-size: 26px; font-weight: 700; }
+  .rep-summary .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+
+  /* rep log */
+  .rep-log { max-height: 360px; overflow: auto; }
+  .rep-log table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .rep-log th { text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+  .rep-log td { padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .rep-log tr:last-child td { border-bottom: 0; }
+  .rep-log tr.valid { }
+  .rep-log tr.invalid td:first-child { color: var(--fail); }
+  .rep-log tr.outside td { opacity: .5; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge-ok { background: var(--badge-ok); color: var(--ok); }
+  .badge-fail { background: var(--badge-fail); color: var(--fail); }
+  .reason-text { font-size: 12px; color: var(--muted); }
+  .rep-log tr.clickable { cursor: pointer; }
+  .rep-log tr.clickable:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+  /* calibration */
+  .cal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 13px; }
+  .cal-grid dt { color: var(--muted); }
+  .cal-grid dd { margin: 0; font-weight: 600; }
+
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: 200px 1fr; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <header><h1>IPPT Tracker</h1><div class="sub" id="count">loading clips...</div></header>
+    <div class="upload-area" id="drop">
+      <input type="file" id="fileIn" accept="video/*">
+      <p>Upload video (drop or click)</p>
+    </div>
+    <div class="filters" id="filters"></div>
+    <input id="search" type="search" placeholder="Search clips" aria-label="Search clips">
+    <div id="list" role="list"></div>
+  </aside>
+  <main>
+    <div class="grid">
+      <section class="card">
+        <div class="title"><b id="name">Pick a clip or upload a video</b><span class="tags" id="tags"></span></div>
+        <div class="stage" id="stage">
+          <video id="video" muted loop playsinline controls></video>
+          <canvas id="overlay"></canvas>
+          <div id="msg" hidden></div>
+        </div>
+        <div class="bar">
+          <label>Source
+            <select id="mode"><option value="smooth">Smoothed</option><option value="raw">Raw</option></select>
+          </label>
+          <label>Speed
+            <select id="speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>1.5</option><option>2</option></select>
+          </label>
+          <label><input type="checkbox" id="far"> Far side</label>
+          <label><input type="checkbox" id="conf" checked> Confidence</label>
+        </div>
+        <div class="analyze-bar">
+          <label>Exercise
+            <select id="exercise"><option value="pushup">Push-up</option><option value="situp">Sit-up</option></select>
+          </label>
+          <label>Age <input type="number" id="age" value="25" min="16" max="60"></label>
+          <label>Sex
+            <select id="sex"><option value="m">Male</option><option value="f">Female</option></select>
+          </label>
+          <button class="btn btn-primary" id="analyzeBtn" disabled>Analyze &amp; Score</button>
+        </div>
+        <div class="hint">Space play/pause | arrows step frames | click chart to seek</div>
+      </section>
+      <div class="col">
+        <!-- Score card (hidden until analysis) -->
+        <section class="card" id="scoreCard" hidden>
+          <div class="card-title">Score</div>
+          <div class="score-box" id="scoreBox"></div>
+        </section>
+        <!-- Rep summary + log (hidden until analysis) -->
+        <section class="card" id="repCard" hidden>
+          <div class="card-title">Reps</div>
+          <div class="rep-summary" id="repSummary"></div>
+          <div class="rep-log" id="repLog"></div>
+        </section>
+        <!-- Calibration info (hidden until analysis) -->
+        <section class="card" id="calCard" hidden>
+          <div class="card-title">Calibration</div>
+          <div id="calInfo"></div>
+        </section>
+        <!-- Angles readout -->
+        <section class="card">
+          <div class="card-title">Live angles</div>
+          <div class="read" id="read"></div>
+        </section>
+        <!-- Signal chart -->
+        <section class="card">
+          <div class="card-title">Signals</div>
+          <canvas id="chart"></canvas>
+          <div class="stats" id="stats"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const SIGNALS = [
+  ["elbow", "Elbow", "shoulder-elbow-wrist"], ["body", "Body line", "shoulder-hip-ankle"],
+  ["hip", "Hip", "shoulder-hip-knee"], ["knee", "Knee", "hip-knee-ankle"],
+];
+const BONES = [["shoulder","elbow"],["elbow","wrist"],["wrist","index"],["wrist","pinky"],["shoulder","hip"],
+               ["hip","knee"],["knee","ankle"],["ankle","heel"],["heel","toe"],["ankle","toe"],["ear","shoulder"]];
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+let clips = [], exFilter = "all", cur = null, data = null, analysis = null, J = {}, frame = 0, token = 0;
+const video = $("video"), cv = $("overlay"), ctx = cv.getContext("2d"), chart = $("chart"), cctx = chart.getContext("2d");
+
+function msg(text) { $("msg").hidden = !text; $("msg").textContent = text || ""; }
+
+/* ---------- upload ---------- */
+const drop = $("drop"), fileIn = $("fileIn");
+drop.addEventListener("click", () => fileIn.click());
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("drag"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
+drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("drag"); if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]); });
+fileIn.addEventListener("change", () => { if (fileIn.files.length) uploadFile(fileIn.files[0]); fileIn.value = ""; });
+
+async function uploadFile(file) {
+  msg("Uploading...");
+  const fd = new FormData();
+  fd.append("file", file);
+  try {
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    msg("Upload complete, refreshing clips...");
+    clips = await (await fetch("/api/clips")).json();
+    renderFilters(); renderList();
+    const uploaded = clips.find(c => c.id === j.id);
+    if (uploaded) select(uploaded);
+    else msg("");
+  } catch(e) { msg("Upload failed: " + e.message); }
+}
+
+/* ---------- clip list ---------- */
+const EXLABEL = { pushup: "Push-up", situp: "Sit-up", unknown: "Other" };
+function renderFilters() {
+  const exs = ["all", ...new Set(clips.map(c => c.exercise))];
+  $("filters").innerHTML = "";
+  for (const e of exs) {
+    const b = document.createElement("button");
+    b.className = "chip"; b.textContent = e === "all" ? "All" : EXLABEL[e] || e;
+    b.setAttribute("aria-pressed", e === exFilter);
+    b.onclick = () => { exFilter = e; renderFilters(); renderList(); };
+    $("filters").append(b);
+  }
+}
+function renderList() {
+  const q = $("search").value.toLowerCase(), box = $("list");
+  box.innerHTML = "";
+  const rows = clips.filter(c => (exFilter === "all" || c.exercise === exFilter) && c.name.toLowerCase().includes(q));
+  $("count").textContent = `${rows.length} of ${clips.length} clips`;
+  let last = "";
+  for (const c of rows) {
+    const g = `${EXLABEL[c.exercise] || c.exercise} · ${c.dataset}`;
+    if (g !== last) { const h = document.createElement("div"); h.className = "grp"; h.textContent = g; box.append(h); last = g; }
+    const b = document.createElement("button");
+    b.className = "item"; b.setAttribute("role", "listitem");
+    b.setAttribute("aria-current", cur && cur.id === c.id);
+    b.innerHTML = `<span></span><span>${c.size_mb} MB</span>`;
+    b.firstChild.textContent = c.name;
+    b.onclick = () => select(c);
+    box.append(b);
+  }
+}
+
+/* ---------- loading a clip ---------- */
+async function select(c) {
+  cur = c; data = null; analysis = null; frame = 0; const my = ++token;
+  renderList(); hideAnalysis();
+  $("name").textContent = c.name;
+  $("tags").textContent = `${EXLABEL[c.exercise] || c.exercise} · ${c.dataset}`;
+  $("stats").innerHTML = ""; renderReadout(null); drawChart(); clearOverlay();
+  if (c.exercise !== "unknown") $("exercise").value = c.exercise;
+  $("analyzeBtn").disabled = true;
+  msg("Preparing video...");
+  video.src = `/api/clips/${c.id}/video`;
+  video.playbackRate = +$("speed").value;
+  video.play().catch(() => {});
+  video.onloadeddata = () => { if (my === token) msg(data ? "" : "Running pose estimation... (first run is slow, then cached)"); };
+  try {
+    const r = await fetch(`/api/clips/${c.id}/pose`);
+    const j = await r.json();
+    if (my !== token) return;
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    data = j; J = Object.fromEntries(j.joints.map((n, i) => [n, i]));
+    msg(""); $("analyzeBtn").disabled = false;
+    renderStats(); drawChart(); update();
+  } catch (e) { if (my === token) msg("Pose failed: " + e.message); }
+}
+video.addEventListener("error", () => msg("Video failed to load (is ffmpeg on PATH?)"));
+
+function renderStats() {
+  const s = data.stats;
+  $("stats").innerHTML =
+    `<span>Frames <b>${data.frames}</b></span><span>FPS <b>${data.fps.toFixed(1)}</b></span>` +
+    `<span>Resolution <b>${data.size[0]}×${data.size[1]}</b></span><span>Near side <b>${data.side === "l" ? "left" : "right"}</b></span>` +
+    `<span>Person detected <b>${(s.detected_frac * 100).toFixed(0)}%</b></span><span>Near-chain confidence <b>${s.mean_conf_near.toFixed(2)}</b></span>` +
+    (s.pose_seconds ? `<span>Pose time <b>${s.pose_seconds}s</b></span>` : "");
+}
+
+/* ---------- overlay drawing ---------- */
+function fitCanvas(c, w, h) {
+  const d = devicePixelRatio || 1;
+  if (c.width !== Math.round(w * d) || c.height !== Math.round(h * d)) { c.width = Math.round(w * d); c.height = Math.round(h * d); }
+  return d;
+}
+function clearOverlay() { ctx.clearRect(0, 0, cv.width, cv.height); }
+
+function sizeStage() {
+  if (!data) return;
+  const st = $("stage"), [w, h] = data.size;
+  st.style.aspectRatio = `${w} / ${h}`;
+  const maxH = innerHeight * 0.68;
+  st.style.width = Math.min(st.parentElement.clientWidth - 28, maxH * w / h) + "px";
+}
+
+function draw() {
+  const r = cv.getBoundingClientRect(), d = fitCanvas(cv, r.width, r.height);
+  ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, r.width, r.height);
+  if (!data) return;
+  const src = analysis || data;
+  const f = (($("mode").value === "raw") ? src.raw : src.smooth)[frame];
+  if (!f) return;
+  const shade = $("conf").checked, near = src.side || data.side, far = near === "l" ? "r" : "l";
+  const pt = n => f[J[n]];
+  const alpha = p => shade ? 0.25 + 0.75 * Math.min(1, p[2]) : 1;
+  const sides = [[far, css("--far"), $("far").checked], [near, css("--near"), true]];
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+
+  // Draw rep regions if analysis exists
+  if (analysis && analysis.reps) {
+    const fps = analysis.fps;
+    for (const rep of analysis.reps) {
+      const x0 = rep.t_start * fps, x1 = (rep.t_end || rep.t_start + 1) * fps;
+      if (frame >= x0 && frame <= x1) {
+        ctx.fillStyle = rep.valid ? "rgba(22,163,74,0.08)" : "rgba(220,38,38,0.08)";
+        ctx.fillRect(0, 0, r.width, r.height);
+        // Rep number overlay
+        ctx.font = "bold 16px system-ui";
+        ctx.fillStyle = rep.valid ? css("--ok") : css("--fail");
+        ctx.textAlign = "right";
+        ctx.fillText(`Rep ${rep.rep} ${rep.valid ? "✓" : "✗"}`, r.width - 12, 24);
+        ctx.textAlign = "left";
+        break;
+      }
+    }
+  }
+
+  for (const [s, col, on] of sides) {
+    if (!on) continue;
+    ctx.lineWidth = s === near ? 3.5 : 2.5;
+    for (const [a, b] of BONES) {
+      const p = pt(`${s}_${a}`), q = pt(`${s}_${b}`);
+      if (!p || !q) continue;
+      ctx.strokeStyle = col; ctx.globalAlpha = Math.min(alpha(p), alpha(q));
+      ctx.beginPath(); ctx.moveTo(p[0] * r.width, p[1] * r.height); ctx.lineTo(q[0] * r.width, q[1] * r.height); ctx.stroke();
+    }
+    for (const n of ["ear","shoulder","elbow","wrist","hip","knee","ankle","heel","toe"]) {
+      const p = pt(`${s}_${n}`); if (!p) continue;
+      ctx.globalAlpha = alpha(p); ctx.fillStyle = "#fff"; ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p[0] * r.width, p[1] * r.height, s === near ? 5 : 3.5, 0, 6.283); ctx.fill(); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+  const nose = pt("nose"), sh = pt(`${near}_shoulder`);
+  if (nose && sh) {
+    ctx.strokeStyle = css("--near"); ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.globalAlpha = .8;
+    ctx.beginPath(); ctx.moveTo(sh[0] * r.width, sh[1] * r.height); ctx.lineTo(nose[0] * r.width, nose[1] * r.height); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.globalAlpha = 1;
+  const el = pt(`${near}_elbow`);
+  const sig = (analysis || data).signals;
+  const ang = sig.elbow[frame];
+  if (el && ang != null) {
+    ctx.font = "600 13px system-ui"; ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 3;
+    const x = el[0] * r.width + 10, y = el[1] * r.height - 10, t = `${ang.toFixed(0)}°`;
+    ctx.strokeText(t, x, y); ctx.fillText(t, x, y);
+  }
+}
+
+/* ---------- readouts + chart ---------- */
+function renderReadout(i) {
+  const sig = (analysis || data);
+  $("read").innerHTML = SIGNALS.map(([k, label, sub]) => {
+    const v = sig && i != null ? sig.signals[k][i] : null;
+    return `<div><small><i style="background:var(--s-${k})"></i>${label}</small><output>${v == null ? "–" : v.toFixed(0) + "<em>°</em>"}</output><small>${sub}</small></div>`;
+  }).join("");
+}
+
+function drawChart() {
+  const r = chart.getBoundingClientRect(), d = fitCanvas(chart, r.width, r.height);
+  cctx.setTransform(d, 0, 0, d, 0, 0); cctx.clearRect(0, 0, r.width, r.height);
+  const L = 30, B = 18, W = r.width - L - 6, H = r.height - B - 6;
+  cctx.font = "11px system-ui"; cctx.fillStyle = css("--muted"); cctx.strokeStyle = css("--line"); cctx.lineWidth = 1;
+  for (const v of [0, 45, 90, 135, 180]) {
+    const y = 6 + H * (1 - v / 180);
+    cctx.beginPath(); cctx.moveTo(L, y); cctx.lineTo(L + W, y); cctx.stroke(); cctx.fillText(v, 2, y + 4);
+  }
+  const sig = analysis || data;
+  if (!sig) return;
+  const n = sig.frames || data.frames, x = i => L + W * i / Math.max(n - 1, 1), y = v => 6 + H * (1 - v / 180);
+  cctx.fillText("0 s", L, r.height - 4);
+  const fps = sig.fps || data.fps;
+  const e = `${(n / fps).toFixed(1)} s`; cctx.fillText(e, L + W - cctx.measureText(e).width, r.height - 4);
+
+  // Draw rep regions on chart
+  if (analysis && analysis.reps) {
+    for (const rep of analysis.reps) {
+      const x0 = x(rep.t_start * fps), x1 = x((rep.t_end || rep.t_start + 1) * fps);
+      cctx.fillStyle = rep.valid ? "rgba(22,163,74,0.10)" : "rgba(220,38,38,0.10)";
+      cctx.fillRect(x0, 6, x1 - x0, H);
+    }
+  }
+
+  for (const [k] of SIGNALS) {
+    cctx.strokeStyle = css(`--s-${k}`); cctx.lineWidth = 1.8; cctx.beginPath();
+    let pen = false;
+    sig.signals[k].forEach((v, i) => { if (v == null) { pen = false; return; } pen ? cctx.lineTo(x(i), y(v)) : cctx.moveTo(x(i), y(v)); pen = true; });
+    cctx.stroke();
+  }
+  cctx.strokeStyle = css("--text"); cctx.lineWidth = 1; cctx.beginPath(); cctx.moveTo(x(frame), 6); cctx.lineTo(x(frame), 6 + H); cctx.stroke();
+}
+chart.addEventListener("click", e => {
+  const sig = analysis || data;
+  if (!sig) return;
+  const r = chart.getBoundingClientRect(), L = 30, W = r.width - L - 6;
+  const fps = sig.fps || data.fps;
+  const n = sig.frames || data.frames;
+  const f = Math.max(0, Math.min(n - 1, Math.round((e.clientX - r.left - L) / W * (n - 1))));
+  video.currentTime = f / fps;
+});
+
+/* ---------- analysis ---------- */
+$("analyzeBtn").addEventListener("click", runAnalysis);
+
+async function runAnalysis() {
+  if (!cur) return;
+  $("analyzeBtn").disabled = true;
+  msg("Running full pipeline: calibrate → reps → score...");
+  const ex = $("exercise").value, age = $("age").value, sex = $("sex").value;
+  try {
+    const r = await fetch(`/api/clips/${cur.id}/analyze?exercise=${ex}&age=${age}&sex=${sex}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    if (j.error) {
+      if (j.error === "calibration_failed") {
+        msg("Calibration failed: " + (j.reasons || []).join("; "));
+      } else {
+        msg("Analysis error: " + j.error);
+      }
+      $("analyzeBtn").disabled = false;
+      return;
+    }
+    analysis = j;
+    J = Object.fromEntries(j.joints.map((n, i) => [n, i]));
+    msg("");
+    showAnalysis(j);
+    update();
+  } catch(e) { msg("Analysis failed: " + e.message); }
+  $("analyzeBtn").disabled = false;
+}
+
+function hideAnalysis() {
+  analysis = null;
+  $("scoreCard").hidden = true;
+  $("repCard").hidden = true;
+  $("calCard").hidden = true;
+}
+
+function showAnalysis(a) {
+  // Score
+  if (a.score) {
+    $("scoreCard").hidden = false;
+    const s = a.score;
+    const tier = s.station_points >= 25 ? "gold" : s.station_points >= 20 ? "silver" :
+                 s.station_points >= 10 ? "pass" : "fail";
+    const tierLabel = tier === "gold" ? "Excellent" : tier === "silver" ? "Great" :
+                      tier === "pass" ? "Good" : "Needs work";
+    $("scoreBox").innerHTML =
+      `<div class="score-big">${s.station_points}<span class="score-max"> / ${s.max_station_points}</span></div>` +
+      `<div class="score-label">${a.exercise === "pushup" ? "Push-up" : "Sit-up"} station points (age ${s.age}, ${s.sex === "m" ? "male" : "female"})</div>` +
+      `<span class="tier tier-${tier}">${tierLabel}</span>`;
+  } else {
+    $("scoreCard").hidden = true;
+  }
+
+  // Rep summary
+  $("repCard").hidden = false;
+  const sm = a.summary;
+  $("repSummary").innerHTML =
+    `<div><div class="num" style="color:var(--ok)">${sm.valid}</div><div class="lbl">Valid</div></div>` +
+    `<div><div class="num" style="color:var(--fail)">${sm.no_count}</div><div class="lbl">No-count</div></div>` +
+    `<div><div class="num">${sm.attempts}</div><div class="lbl">Attempts</div></div>` +
+    (sm.outside_window ? `<div><div class="num" style="color:var(--muted)">${sm.outside_window}</div><div class="lbl">Outside window</div></div>` : "");
+
+  // Rep log table
+  let html = '<table><thead><tr><th>#</th><th>Time</th><th>Status</th><th>Details</th></tr></thead><tbody>';
+  for (const r of a.reps) {
+    const cls = [r.valid ? "valid" : "invalid", r.in_window ? "" : "outside", "clickable"].filter(Boolean).join(" ");
+    const badge = r.valid
+      ? '<span class="badge badge-ok">Valid</span>'
+      : '<span class="badge badge-fail">No-count</span>';
+    const reasons = r.reasons.length
+      ? `<div class="reason-text">${r.reasons.map(escHtml).join(", ")}</div>`
+      : "";
+    const checks = r.checks.filter(c => !c.passed).map(c => {
+      const val = c.value != null ? c.value.toFixed(1) : "?";
+      const thr = c.threshold != null ? c.threshold.toFixed(1) : "?";
+      return `<span class="reason-text">${escHtml(c.name)}: ${val}${c.unit} vs ${thr}${c.unit}</span>`;
+    }).join("<br>");
+    const time = r.t_end != null ? `${r.t_start.toFixed(1)}s – ${r.t_end.toFixed(1)}s` : `${r.t_start.toFixed(1)}s – ?`;
+    html += `<tr class="${cls}" data-t="${r.t_start}"><td>${r.rep}</td><td>${time}</td><td>${badge}</td><td>${reasons}${checks}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  $("repLog").innerHTML = html;
+
+  // Click rep row to seek
+  for (const tr of $("repLog").querySelectorAll("tr.clickable")) {
+    tr.addEventListener("click", () => {
+      const t = parseFloat(tr.dataset.t);
+      if (!isNaN(t)) { video.currentTime = t; video.pause(); }
+    });
+  }
+
+  // Calibration
+  if (a.calibration) {
+    $("calCard").hidden = false;
+    const cal = a.calibration;
+    let info = '<dl class="cal-grid">';
+    if (cal.segments) {
+      for (const [k, [t0, t1]] of Object.entries(cal.segments)) {
+        info += `<dt>${k}</dt><dd>${t0.toFixed(1)}s – ${t1.toFixed(1)}s</dd>`;
+      }
+    }
+    if (cal.rom) {
+      info += `<dt>ROM low</dt><dd>${cal.rom.lo.toFixed(1)}°</dd>`;
+      info += `<dt>ROM high</dt><dd>${cal.rom.hi.toFixed(1)}°</dd>`;
+    }
+    info += '</dl>';
+    if (cal.warnings && cal.warnings.length) {
+      info += '<div style="margin-top:8px;font-size:12px;color:var(--warn)">' +
+        cal.warnings.map(w => `⚠ ${escHtml(w)}`).join("<br>") + '</div>';
+    }
+    $("calInfo").innerHTML = info;
+  }
+}
+
+function escHtml(s) {
+  const d = document.createElement("div"); d.textContent = s; return d.innerHTML;
+}
+
+/* ---------- sync ---------- */
+function update() {
+  if (!data && !analysis) return;
+  const fps = (analysis || data).fps;
+  const nf = (analysis || data).frames;
+  frame = Math.max(0, Math.min(nf - 1, Math.round(video.currentTime * fps)));
+  sizeStage(); draw(); renderReadout(frame); drawChart();
+}
+if ("requestVideoFrameCallback" in video) {
+  const tick = (_, meta) => {
+    if (data || analysis) {
+      const fps = (analysis || data).fps;
+      const nf = (analysis || data).frames;
+      frame = Math.max(0, Math.min(nf - 1, Math.round(meta.mediaTime * fps)));
+      draw(); renderReadout(frame); drawChart();
+    }
+    video.requestVideoFrameCallback(tick);
+  };
+  video.requestVideoFrameCallback(tick);
+} else {
+  (function loop() { update(); requestAnimationFrame(loop); })();
+}
+for (const ev of ["seeked", "pause", "loadeddata"]) video.addEventListener(ev, update);
+for (const id of ["mode", "far", "conf"]) $(id).addEventListener("change", update);
+$("speed").addEventListener("change", () => { video.playbackRate = +$("speed").value; });
+$("search").addEventListener("input", renderList);
+addEventListener("resize", update);
+addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.code === "Space") { e.preventDefault(); video.paused ? video.play() : video.pause(); }
+  else if ((e.code === "ArrowLeft" || e.code === "ArrowRight") && (data || analysis)) {
+    e.preventDefault(); video.pause();
+    const fps = (analysis || data).fps;
+    video.currentTime = Math.max(0, (frame + (e.code === "ArrowRight" ? 1 : -1) + 0.5) / fps);
+  }
+});
+
+/* ---------- boot ---------- */
+(async () => {
+  clips = await (await fetch("/api/clips")).json();
+  renderFilters(); renderList(); renderReadout(null); drawChart();
+  if (!clips.length) msg("No clips found. Upload a video or run: ippt data fetch hmdb51_pushup_situp");
+  else {
+    const want = new URLSearchParams(location.search).get("clip");
+    select(clips.find(c => c.id === want) || clips.find(c => c.exercise === "pushup") || clips[0]);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+# Dataset registry. Everything downloads under $IPPT_DATA_DIR (default
+# ~/ippt_data), never into this OneDrive-synced folder.
+#
+# Sizes are not recorded until a dataset is actually on disk (`ippt data status`
+# measures them). Check each licence before training on it.
+
+budget_gb: 5
+
+datasets:
+  # --- sample clips for the dashboard (auto-download, no account) -------------
+  workout_vids_pushup:
+    purpose: 56 gym push-up clips (mp4); pulled out of a 4.9 GB zip by ranged reads, so only ~70 MB is downloaded
+    source: https://huggingface.co/datasets/34data/workout-vids
+    method: hf_zip
+    hf_repo: 34data/workout-vids
+    hf_file: videos.zip
+    prefix: push-up/
+    exercises: [pushup]
+    notes: No licence stated on the card. Local development use only; do not redistribute.
+
+  hmdb51_pushup_situp:
+    purpose: short (2-5 s) web clips of push-ups and sit-ups from HMDB51; the only auto-downloadable sit-ups
+    source: https://huggingface.co/datasets/mteb/HMDB51
+    method: hf_rows
+    hf_repo: mteb/HMDB51
+    splits: [train, test]
+    labels: {29: pushup, 38: situp}      # class ids in the HMDB51 label list
+    exercises: [pushup, situp]
+    notes: HMDB51 is CC BY 4.0. Clips are low resolution, mixed viewpoints, often a few reps only.
+
+  # --- registry of other sources (manual / account needed) --------------------
+  repcount:
+    purpose: video; temporal work, rep-count evaluation, frame extraction
+    source: https://svip-lab.github.io/dataset/RepCount_dataset.html
+    method: manual          # download from the project page, unpack to <data>/repcount
+    exercises: [pushup, situp]
+    notes: Part-B (simulated physical exams) is closest to a test station but may not be public.
+
+  kaggle_exercise_recognition:
+    purpose: MediaPipe landmarks for up/down terminal positions; quick sanity checks
+    source: https://www.kaggle.com/datasets/muhannadtuameh/exercise-recognition
+    method: kaggle          # needs ~/.kaggle/kaggle.json
+    kaggle_slug: muhannadtuameh/exercise-recognition
+    exercises: [pushup, situp]
+
+  roboflow_pushup_mayho:
+    purpose: images with keypoints, push-up up/down classes
+    source: https://universe.roboflow.com/search?q=class%3Apushup
+    method: manual          # export from Roboflow Universe (needs an account)
+    exercises: [pushup]
+
+  roboflow_workout_reps_counter:
+    purpose: keypoint images, start/end classes (push-up and sit-up)
+    source: https://universe.roboflow.com/search?q=class%3Apush
+    method: manual
+    exercises: [pushup, situp]
+
+  roboflow_pushup_situp_label:
+    purpose: person / push-up / sit-up detection boxes, CC BY 4.0
+    source: https://universe.roboflow.com/label-dataset/push-up-situp
+    method: manual
+    exercises: [pushup, situp]

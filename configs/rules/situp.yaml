@@ -1,0 +1,43 @@
+# Sit-up rule profile.
+#
+# STATUS: UNVERIFIED PLACEHOLDERS. Check the start/end positions, hand position
+# and any elbow-to-knee requirement against the current MINDEF/HPB standard.
+
+exercise: situp
+status: unverified
+required_joints: [shoulder, hip, knee, ankle]
+
+session:
+  duration_s: 60
+
+segmentation:
+  signal: torso_angle_deg
+  direction: above          # an attempt is a rise of the signal above `enter`
+  default_rom: {lo: 5.0, hi: 85.0}
+  enter_frac: 0.25          # enter = lo + enter_frac * ROM
+  exit_frac: 0.12
+  enter_min_deg: 8.0        # never trigger within this many degrees of lying flat
+  min_excursion_frac: 0.35
+  min_duration_s: 0.5
+  settle_s: 0.35
+
+checks:
+  top:
+    min_torso_deg: 75.0     # torso angle from the ground line (0 flat, 90 upright)
+  return:
+    max_torso_deg: 15.0     # hard limit
+    tolerance_deg: 8.0      # effective limit = min(calibrated lying angle + tolerance, max)
+  feet_anchor:
+    max_drift_foot_lengths: 0.35
+  hip_bridge:
+    max_rise_torso: 0.15    # hip rise as a fraction of torso length
+  knee_angle:
+    enabled: false
+    min_deg: 50.0
+    max_deg: 140.0
+  hands:
+    enabled: false
+    max_wrist_ear_upper_arm: 1.0
+  visibility:
+    min_conf: 0.4
+    min_visible_fraction: 0.8

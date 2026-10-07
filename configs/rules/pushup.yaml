@@ -1,0 +1,40 @@
+# Push-up rule profile.
+#
+# STATUS: UNVERIFIED PLACEHOLDERS. Check every threshold against the current
+# MINDEF/HPB IPPT standard before using this for anything official.
+#
+# Calibration only changes how things are measured (ground line, body-relative
+# units, natural posture offsets) and how reps are segmented. The thresholds in
+# `checks` are fixed rule limits that calibration cannot relax.
+
+exercise: pushup
+status: unverified
+required_joints: [shoulder, elbow, wrist, hip, knee, ankle]
+
+session:
+  duration_s: 60
+
+segmentation:
+  signal: elbow_angle
+  direction: below          # an attempt is a dip of the signal below `enter`
+  default_rom: {hi: 175.0, lo: 75.0}   # used when calibration has no range data
+  enter_frac: 0.20          # enter = hi - enter_frac * ROM  (capped by enter_max)
+  exit_frac: 0.10
+  enter_max: 150.0
+  min_excursion_frac: 0.30  # smaller dips are jitter and are not logged
+  min_duration_s: 0.35
+  settle_s: 0.35            # window after the exit crossing used to find peak lockout
+
+checks:
+  depth:
+    max_upper_arm_incline_deg: 5.0   # 0 = upper arm parallel to floor, + = shoulder above elbow
+  lockout:
+    min_elbow_deg: 160.0
+  body_line:
+    max_sag_norm: 0.18      # hip below shoulder-ankle line, fraction of torso length
+    max_pike_norm: 0.18     # hip above the line
+  ground_contact:
+    max_knee_drop_norm: 0.12  # knee below the shoulder-ankle line, fraction of torso length
+  visibility:
+    min_conf: 0.4
+    min_visible_fraction: 0.8

@@ -1,0 +1,23 @@
+# Pipeline-wide settings. Exercise rules live in configs/rules/*.yaml.
+
+pose:
+  backend: mediapipe
+  variant: heavy            # lite | full | heavy
+  min_detection_confidence: 0.5
+  min_presence_confidence: 0.5
+  min_tracking_confidence: 0.5
+
+preprocess:
+  min_conf: 0.4             # joints below this are treated as missing
+  max_gap_frames: 8         # longest dropout that is linearly interpolated
+  one_euro:                 # run on coordinates normalised by image height
+    min_cutoff: 1.5
+    beta: 8.0
+    d_cutoff: 1.0
+
+calibration:
+  min_start_frames: 20      # frames needed in the static start segment
+  min_mean_conf: 0.6        # near-side chain confidence needed to accept
+  max_start_motion: 0.08    # max joint wander in the start segment (fraction of torso length)
+  max_frontal_ratio: 0.6    # |L-R shoulder x gap| / torso length; above this the view is not a side view
+  min_ground_separation: 0.05   # ground contact points must be this far apart (fraction of image height)
