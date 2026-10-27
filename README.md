@@ -32,24 +32,40 @@ caches (pose tracks, web transcodes) live in `data/interim/`. Both are gitignore
 and the dataset budget is 5 GB (`configs/datasets.yaml`). `pip install -e ".[data]"`
 adds the download dependencies; the dashboard also needs `ffmpeg` on PATH.
 
-## Sample data and dashboard
+## Live camera dashboard
+
+```powershell
+ippt dashboard                           # http://127.0.0.1:8000
+```
+
+Starts a stdlib WebSocket server (no Flask/FastAPI/ffmpeg) with two pages:
+
+- **Display** (`/`, open on your PC) — shows the live camera feed with the
+  MediaPipe skeleton drawn on top (near side highlighted), the rep counter, and a
+  scrolling signal (elbow/torso angle) chart.
+- **Camera** (`/camera`, open on your phone) — shown as a URL on the display
+  page. Grabs the phone camera, streams JPEG frames to the server over
+  `/ws/camera`, and shows its own big rep counter.
+
+The server (`src/ippt/live.py`) runs the same calibration + streaming rep-counter
+logic as the offline pipeline, frame by frame: hold the starting position still
+for ~2 s to auto-calibrate, then do your reps. Results and the raw video frame
+are broadcast to any connected display clients over `/ws/display`, so the rep
+count updates live on both the phone and the dashboard.
+
+Pose runs on the `full` MediaPipe variant by default (`configs/pipeline.yaml`) —
+`heavy` is noticeably too slow for live use; drop to `lite` if you still see lag.
+The phone paces frame sending to the server's own processing speed (waits for
+each frame's result before sending the next) rather than firing on a fixed
+timer, so lag stays bounded instead of growing over time.
 
 ```powershell
 ippt data fetch workout_vids_pushup      # 56 gym push-up clips (~70 MB, ranged read from a 4.9 GB zip)
 ippt data fetch hmdb51_pushup_situp      # 100 push-up + 100 sit-up clips from HMDB51 (CC BY 4.0)
-ippt dashboard                           # http://127.0.0.1:8000
 ```
 
-The dashboard plays any clip under `data/raw/datasets/` (or uploaded videos) with
-the MediaPipe skeleton drawn over it (near side highlighted, smoothed or raw), live
-elbow / body-line / hip / knee angles, and a signal chart you can click to seek.
-Pose runs on first open of a clip and is cached.
-
-Click **Analyze & Score** to run the full pipeline on a clip: auto-calibration
-detects the starting pose, reps are segmented and checked against rules, and the
-result is scored using the official IPPT tables. The dashboard shows a rep-by-rep
-log (valid/no-count with reasons and measured values), station points, and
-calibration details. You can also upload your own video via the sidebar.
+These sample clips are for offline pipeline work (`ippt pose` / `ippt analyze`
+below) — the live dashboard only uses the camera.
 
 ## Pipeline
 
@@ -73,6 +89,8 @@ video -> MediaPipe pose (33 pts) -> internal skeleton (23 joints)
 | `reps.py` | Segmentation, per-rep checks, 60 s window |
 | `scoring.py` | CSV table lookup (table not bundled) |
 | `sim.py` | Kinematic simulator with injectable faults, used by tests |
+| `live.py` | Frame-by-frame live session: streaming calibration + rep counter for the camera dashboard |
+| `dashboard/server.py` | Stdlib WebSocket server behind `ippt dashboard`; relays camera frames + results to display clients |
 | `datasets.py`, `cli.py`, `viz.py`, `pipeline.py` | Registry, CLI, review video, orchestration |
 
 Rules live in `configs/rules/*.yaml`, pipeline settings in `configs/pipeline.yaml`,
@@ -122,8 +140,6 @@ ippt data status                                                 # datasets on d
 - **Rules are placeholders.** `configs/rules/*.yaml` may need adjusting,
   especially the sit-up end position, hand position and elbow-to-knee requirement.
   Check against current MINDEF/HPB standard before relying on them.
-- **Live camera feed.** Real-time pose + rep counting via webcam is planned but
-  not yet implemented.
 - **Not started:** data cleaning, training, the TCN/GRU rep-validity model,
   fine-tuning a keypoint model, run station.
 

@@ -2,7 +2,7 @@
 
 pose:
   backend: mediapipe
-  variant: heavy            # lite | full | heavy
+  variant: full             # lite | full | heavy (heavy is too slow for live use)
   min_detection_confidence: 0.5
   min_presence_confidence: 0.5
   min_tracking_confidence: 0.5

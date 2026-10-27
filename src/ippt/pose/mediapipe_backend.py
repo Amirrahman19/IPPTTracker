@@ -75,6 +75,10 @@ class MediaPipePoseEstimator:
             img = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
             return self._to_arrays(lm.detect(img), w, h)
 
+    def open_live(self) -> "LiveLandmarker":
+        """Return a persistent VIDEO-mode landmarker for frame-by-frame live use."""
+        return LiveLandmarker(self)
+
     def estimate_video(self, path: str | Path, max_frames: int | None = None, progress: bool = True) -> PoseSequence:
         import mediapipe as mp
         cap = cv2.VideoCapture(str(path))
@@ -111,3 +115,26 @@ class MediaPipePoseEstimator:
         if not ts:
             raise ValueError(f"no frames read from {path}")
         return PoseSequence(np.array(ts), np.stack(xys), np.stack(confs), (w, h), str(path))
+
+
+class LiveLandmarker:
+    """Persistent VIDEO-mode landmarker for frame-by-frame live estimation."""
+
+    def __init__(self, estimator: MediaPipePoseEstimator):
+        self._est = estimator
+        self._lm = estimator._landmarker(video=True).__enter__()
+        self._frame_idx = 0
+
+    def estimate(self, bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        import mediapipe as mp
+        h, w = bgr.shape[:2]
+        img = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        t_ms = int(self._frame_idx * 1000 / 15)
+        self._frame_idx += 1
+        result = self._lm.detect_for_video(img, t_ms)
+        return self._est._to_arrays(result, w, h)
+
+    def close(self):
+        if self._lm:
+            self._lm.__exit__(None, None, None)
+            self._lm = None

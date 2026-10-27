@@ -14,7 +14,7 @@ dependencies = [
     "pyyaml",
     "tqdm",
     "mediapipe",
-    "opencv-contrib-python<5",
+    "opencv-python-headless<5",
 ]
 
 [project.optional-dependencies]

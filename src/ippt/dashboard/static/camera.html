@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>IPPT Camera</title>
+<style>
+:root {
+  --bg: #0a0a0a; --fg: #e0e0e0; --accent: #4fc3f7;
+  --card: #1a1a1a; --border: #333; --green: #66bb6a; --red: #ef5350;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif;
+       display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+.top-bar { padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;
+           background: var(--card); border-bottom: 1px solid var(--border); }
+.top-bar h1 { font-size: 16px; font-weight: 600; }
+.status { font-size: 13px; padding: 4px 10px; border-radius: 12px; }
+.status.connected { background: rgba(102,187,106,0.2); color: var(--green); }
+.status.disconnected { background: rgba(239,83,80,0.2); color: var(--red); }
+.video-wrap { flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+              overflow: hidden; background: #000; }
+video { width: 100%; height: 100%; object-fit: cover; }
+canvas { display: none; }
+.overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex;
+           flex-direction: column; align-items: center; justify-content: center;
+           pointer-events: none; }
+.rep-count { font-size: 120px; font-weight: 800; color: #fff; text-shadow: 0 4px 24px rgba(0,0,0,0.7);
+             line-height: 1; opacity: 0.9; }
+.rep-label { font-size: 16px; color: rgba(255,255,255,0.7); text-transform: uppercase;
+             letter-spacing: 2px; margin-top: 4px; }
+.state-msg { position: absolute; bottom: 80px; left: 16px; right: 16px; text-align: center;
+             font-size: 18px; font-weight: 600; color: var(--accent);
+             text-shadow: 0 2px 12px rgba(0,0,0,0.8); }
+.progress-ring { position: absolute; bottom: 120px; }
+.bottom-bar { padding: 12px 16px; display: flex; gap: 10px; justify-content: center;
+              background: var(--card); border-top: 1px solid var(--border); }
+button { background: var(--accent); color: #000; border: none; padding: 10px 20px;
+         border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+button:active { opacity: 0.8; }
+button.secondary { background: var(--border); color: var(--fg); }
+.flash { animation: flash-green 0.3s ease-out; }
+@keyframes flash-green {
+  0% { text-shadow: 0 0 60px var(--green), 0 4px 24px rgba(0,0,0,0.7); }
+  100% { text-shadow: 0 4px 24px rgba(0,0,0,0.7); }
+}
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>IPPT Camera</h1>
+  <span class="status disconnected" id="connStatus">Disconnected</span>
+</div>
+
+<div class="video-wrap">
+  <video id="vid" autoplay playsinline muted></video>
+  <canvas id="cap"></canvas>
+  <div class="overlay">
+    <div class="rep-count" id="repCount">0</div>
+    <div class="rep-label">reps</div>
+  </div>
+  <div class="state-msg" id="stateMsg">Tap Start to begin</div>
+</div>
+
+<div class="bottom-bar">
+  <button id="btnStart">Start</button>
+  <button id="btnFlip" class="secondary">Flip</button>
+</div>
+
+<script>
+const vid = document.getElementById('vid');
+const cap = document.getElementById('cap');
+const ctx = cap.getContext('2d');
+const repCountEl = document.getElementById('repCount');
+const stateMsg = document.getElementById('stateMsg');
+const connStatus = document.getElementById('connStatus');
+const btnStart = document.getElementById('btnStart');
+const btnFlip = document.getElementById('btnFlip');
+
+let ws = null;
+let stream = null;
+let sending = false;
+let facingMode = 'environment';
+const MIN_FRAME_GAP_MS = 1000 / 15;  // cap, but pacing is driven by server acks below
+
+async function startCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    });
+    vid.srcObject = stream;
+    await vid.play();
+  } catch (e) {
+    stateMsg.textContent = 'Camera access denied';
+  }
+}
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/camera`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => {
+    connStatus.textContent = 'Connected';
+    connStatus.className = 'status connected';
+    startSending();
+  };
+  ws.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.rep_count !== undefined) {
+        const prev = parseInt(repCountEl.textContent);
+        repCountEl.textContent = d.rep_count;
+        if (d.rep_count > prev) {
+          repCountEl.classList.remove('flash');
+          void repCountEl.offsetWidth;
+          repCountEl.classList.add('flash');
+        }
+      }
+      if (d.message) stateMsg.textContent = d.message;
+      else if (d.state === 'counting') stateMsg.textContent = '';
+    } catch {}
+    // Server finished the previous frame — safe to send the next one now.
+    // This paces sending to the server's actual processing speed, instead of
+    // firing on a fixed timer and building up an ever-growing backlog of lag.
+    scheduleNextFrame();
+  };
+  ws.onclose = () => {
+    connStatus.textContent = 'Disconnected';
+    connStatus.className = 'status disconnected';
+    stopSending();
+    setTimeout(connectWS, 2000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function captureFrame() {
+  if (!vid.videoWidth) return null;
+  cap.width = Math.min(vid.videoWidth, 480);
+  cap.height = Math.round(cap.width * vid.videoHeight / vid.videoWidth);
+  ctx.drawImage(vid, 0, 0, cap.width, cap.height);
+  return new Promise(resolve => {
+    cap.toBlob(resolve, 'image/jpeg', 0.7);
+  });
+}
+
+let lastSendTime = 0;
+
+async function sendFrame() {
+  if (!sending || !ws || ws.readyState !== 1) return;
+  const blob = await captureFrame();
+  if (!blob) { scheduleNextFrame(); return; }
+  const buf = await blob.arrayBuffer();
+  if (!sending || !ws || ws.readyState !== 1) return;
+  lastSendTime = performance.now();
+  ws.send(buf);
+}
+
+function scheduleNextFrame() {
+  if (!sending) return;
+  const elapsed = performance.now() - lastSendTime;
+  const wait = Math.max(MIN_FRAME_GAP_MS - elapsed, 0);
+  setTimeout(sendFrame, wait);
+}
+
+function startSending() {
+  if (sending) return;
+  sending = true;
+  sendFrame();
+}
+
+function stopSending() {
+  sending = false;
+}
+
+btnStart.addEventListener('click', () => {
+  if (!ws || ws.readyState !== 1) {
+    startCamera().then(connectWS);
+    btnStart.textContent = 'Running...';
+    btnStart.disabled = true;
+  }
+});
+
+btnFlip.addEventListener('click', () => {
+  facingMode = facingMode === 'environment' ? 'user' : 'environment';
+  if (stream) startCamera();
+});
+
+// Auto-start on load
+startCamera();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: ippt-dashboard
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: IPPT_DATA_DIR
+        value: /app/data/raw

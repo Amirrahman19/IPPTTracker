@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -116,10 +117,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("name", nargs="?")
     p.set_defaults(fn=cmd_data)
 
-    p = sub.add_parser("dashboard", help="localhost dashboard that plays sample clips with pose overlay")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8000)
-    p.add_argument("--no-browser", action="store_true")
+    p = sub.add_parser("dashboard", help="live camera assessment dashboard")
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
+    p.add_argument("--no-browser", action="store_true", default=bool(os.environ.get("PORT")))
     p.set_defaults(fn=cmd_dashboard)
 
     args = ap.parse_args(argv)

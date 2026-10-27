@@ -7,6 +7,7 @@ __pycache__/
 # (this folder syncs to OneDrive). Datasets and models live under IPPT_DATA_DIR.
 data/raw/
 data/interim/
+data/certs/
 runs/
 *.task
 *.mp4

@@ -1,317 +1,253 @@
-"""Localhost dashboard: play sample clips with pose overlay, run the full
-assessment pipeline (auto-calibrate → reps → score), and accept uploads.
+"""Live assessment dashboard: phone camera streams frames over WebSocket,
+server runs MediaPipe pose + streaming rep counter, display page shows
+big counter, skeleton overlay and scrolling angle graph.
 
-Stdlib only (no Flask/FastAPI). Pose tracks and browser-playable transcodes are
-made on first request and cached under data/interim/.
+Stdlib + WebSocket (no Flask/FastAPI/ffmpeg).
 """
 
 from __future__ import annotations
 
-import cgi
+import base64
+import hashlib
 import json
-import re
-import shutil
-import subprocess
-import tempfile
+import socket
+import struct
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import unquote, urlparse
 
-import numpy as np
+from ..live import LiveSession
 
-from ..config import interim_dir, load_pipeline_config, load_rules, PROJECT_ROOT
-from ..datasets import dataset_path, registry
-from ..geometry import angle_deg
-from ..schema import JOINTS, PoseSequence
-from ..signal import preprocess
-
-VIDEO_EXT = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 STATIC = Path(__file__).parent / "static"
-UPLOAD_DIR = PROJECT_ROOT / "data" / "raw" / "uploads"
-_pose_lock = threading.Lock()
-_locks: dict[str, threading.Lock] = {}
-_estimator = None
+WS_MAGIC = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+_session = LiveSession()
+_session_lock = threading.Lock()
+_display_clients: set[socket.socket] = set()
+_display_lock = threading.Lock()
 
 
-# ── clip discovery ──────────────────────────────────────────────────────────
+# ── minimal WebSocket implementation ──────────────────────────────────────
 
-def discover() -> dict[str, dict]:
-    """All sample clips + uploads on disk, keyed by a URL-safe id."""
-    clips = {}
-    # Dataset clips
-    for ds, d in registry()["datasets"].items():
-        root = dataset_path(ds)
-        if not root.exists():
-            continue
-        for f in sorted(root.rglob("*")):
-            if f.suffix.lower() not in VIDEO_EXT:
-                continue
-            m = re.match(r"(pushup|situp)_", f.name)
-            ex = m.group(1) if m else (d["exercises"][0] if len(d.get("exercises", [])) == 1 else "unknown")
-            cid = re.sub(r"[^A-Za-z0-9_.-]", "-", f"{ds}__{f.stem}")
-            clips[cid] = {"id": cid, "dataset": ds, "name": f.name, "exercise": ex, "path": str(f),
-                          "size_mb": round(f.stat().st_size / 1e6, 2)}
-    # Uploaded clips
-    if UPLOAD_DIR.exists():
-        for f in sorted(UPLOAD_DIR.iterdir()):
-            if f.suffix.lower() not in VIDEO_EXT:
-                continue
-            cid = re.sub(r"[^A-Za-z0-9_.-]", "-", f"upload__{f.stem}")
-            clips[cid] = {"id": cid, "dataset": "upload", "name": f.name, "exercise": "unknown", "path": str(f),
-                          "size_mb": round(f.stat().st_size / 1e6, 2)}
-    return clips
+def _ws_accept_key(key: str) -> str:
+    return base64.b64encode(
+        hashlib.sha1(key.encode() + WS_MAGIC).digest()
+    ).decode()
 
 
-def _lock(key: str) -> threading.Lock:
-    return _locks.setdefault(key, threading.Lock())
+def _ws_handshake(handler: BaseHTTPRequestHandler):
+    key = handler.headers.get("Sec-WebSocket-Key", "")
+    handler.send_response(101)
+    handler.send_header("Upgrade", "websocket")
+    handler.send_header("Connection", "Upgrade")
+    handler.send_header("Sec-WebSocket-Accept", _ws_accept_key(key))
+    handler.end_headers()
 
 
-# ── pose estimation (cached) ───────────────────────────────────────────────
+def _ws_recv(sock: socket.socket) -> tuple[int | None, bytes | None]:
+    """Read one WebSocket frame. Returns (opcode, payload) or (None, None) on disconnect."""
+    def _read(n):
+        buf = b""
+        while len(buf) < n:
+            chunk = sock.recv(n - len(buf))
+            if not chunk:
+                return None
+            buf += chunk
+        return buf
 
-def pose_track(clip: dict) -> tuple[PoseSequence, float]:
-    global _estimator
-    cache = interim_dir() / "pose" / f"{clip['id']}.npz"
-    with _lock("pose:" + clip["id"]):
-        if cache.exists():
-            return PoseSequence.load(cache), 0.0
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        t0 = time.time()
-        with _pose_lock:
-            if _estimator is None:
-                from ..pose import MediaPipePoseEstimator
-                _estimator = MediaPipePoseEstimator.from_config(load_pipeline_config())
-            seq = _estimator.estimate_video(clip["path"], progress=False)
-        seq.save(cache)
-        return seq, time.time() - t0
-
-
-def web_video(clip: dict, fps: float) -> Path:
-    out = interim_dir() / "web" / f"{clip['id']}.mp4"
-    with _lock("video:" + clip["id"]):
-        if out.exists():
-            return out
-        if not shutil.which("ffmpeg"):
-            raise RuntimeError("ffmpeg not on PATH")
-        out.parent.mkdir(parents=True, exist_ok=True)
-        tmp = out.with_suffix(".part.mp4")
-        subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", clip["path"], "-an",
-             "-vf", f"scale=trunc(iw/2)*2:trunc(ih/2)*2,fps={fps:.4f}",
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-             "-movflags", "+faststart", str(tmp)],
-            check=True)
-        tmp.replace(out)
-        return out
-
-
-# ── pose-only payload (same as before) ─────────────────────────────────────
-
-def _num(a: np.ndarray, nd: int) -> list:
-    return [None if not np.isfinite(v) else round(float(v), nd) for v in a]
+    header = _read(2)
+    if header is None or len(header) < 2:
+        return None, None
+    opcode = header[0] & 0x0F
+    masked = (header[1] >> 7) & 1
+    length = header[1] & 0x7F
+    if length == 126:
+        ext = _read(2)
+        if ext is None:
+            return None, None
+        length = struct.unpack(">H", ext)[0]
+    elif length == 127:
+        ext = _read(8)
+        if ext is None:
+            return None, None
+        length = struct.unpack(">Q", ext)[0]
+    mask = _read(4) if masked else b"\x00\x00\x00\x00"
+    if mask is None:
+        return None, None
+    data = _read(length) if length > 0 else b""
+    if data is None:
+        return None, None
+    if masked:
+        data = bytearray(data)
+        for i in range(len(data)):
+            data[i] ^= mask[i % 4]
+        data = bytes(data)
+    return opcode, data
 
 
-def _frames(seq: PoseSequence) -> list:
-    w, h = seq.size
-    norm = seq.xy / np.array([w, h])
-    return [[None if np.isnan(norm[t, j, 0]) else [round(float(norm[t, j, 0]), 4), round(float(norm[t, j, 1]), 4),
-                                                   round(float(seq.conf[t, j]), 2)]
-             for j in range(len(JOINTS))] for t in range(len(seq))]
+def _ws_send(sock: socket.socket, data: bytes | str, opcode: int | None = None):
+    if isinstance(data, str):
+        data = data.encode()
+        opcode = opcode or 1
+    else:
+        opcode = opcode or 2
+    header = bytearray()
+    header.append(0x80 | opcode)
+    length = len(data)
+    if length < 126:
+        header.append(length)
+    elif length < 65536:
+        header.append(126)
+        header.extend(struct.pack(">H", length))
+    else:
+        header.append(127)
+        header.extend(struct.pack(">Q", length))
+    sock.sendall(bytes(header) + data)
 
 
-def pose_payload(clip: dict) -> dict:
-    raw, took = pose_track(clip)
-    cfg = load_pipeline_config()
-    clean = preprocess(raw, cfg)
-    w, h = raw.size
-    chain = ("shoulder", "elbow", "wrist", "hip", "knee", "ankle")
-    side_score = {s: float(np.mean([raw.joint_conf(f"{s}_{n}").mean() for n in chain])) for s in ("l", "r")}
-    side = max(side_score, key=side_score.get)
-    P = clean.side_points(side)
-    signals = {
-        "elbow": angle_deg(P["shoulder"], P["elbow"], P["wrist"]),
-        "hip": angle_deg(P["shoulder"], P["hip"], P["knee"]),
-        "knee": angle_deg(P["hip"], P["knee"], P["ankle"]),
-        "body": angle_deg(P["shoulder"], P["hip"], P["ankle"]),
-    }
-    detected = float(np.mean(~np.isnan(raw.xy[:, :, 0]).all(axis=1)))
-    return {
-        "clip": {k: clip[k] for k in ("id", "dataset", "name", "exercise")},
-        "fps": raw.fps, "frames": len(raw), "size": [w, h], "side": side, "joints": list(JOINTS),
-        "raw": _frames(raw), "smooth": _frames(clean),
-        "signals": {k: _num(v, 1) for k, v in signals.items()},
-        "stats": {"detected_frac": round(detected, 3),
-                  "mean_conf_near": round(float(np.mean([raw.joint_conf(f"{side}_{n}").mean() for n in chain])), 3),
-                  "pose_seconds": round(took, 1)},
-    }
-
-
-# ── full analysis payload ──────────────────────────────────────────────────
-
-def analyze_payload(clip: dict, exercise: str, age: int = 25, sex: str = "m") -> dict:
-    """Run the complete pipeline: pose → auto-calibrate → reps → score."""
-    from ..auto_calibrate import auto_calibrate
-    from ..calibration import CalibrationError
-    from ..pipeline import analyze_sequence
-    from ..scoring import ScoreTable
-
-    cfg = load_pipeline_config()
-    rules = load_rules(exercise)
-    raw, took = pose_track(clip)
-
-    # Auto-calibrate
+def _ws_close(sock: socket.socket):
     try:
-        profile, segments = auto_calibrate(exercise, raw, cfg, rules)
-    except CalibrationError as e:
-        return {"error": "calibration_failed", "reasons": e.reasons}
+        _ws_send(sock, b"", opcode=8)
+    except OSError:
+        pass
 
-    # Analyze
-    # Use the end of the calibration window as the timer start
-    t_start = segments["start"][1] + 0.5
-    result = analyze_sequence(exercise, raw, profile, cfg, rules, t_start=t_start)
 
-    # Score
-    score_info = None
+# ── WebSocket handlers ────────────────────────────────────────────────────
+
+def _broadcast_to_displays(msg: str | bytes):
+    with _display_lock:
+        dead = set()
+        for s in _display_clients:
+            try:
+                _ws_send(s, msg)
+            except OSError:
+                dead.add(s)
+        _display_clients.difference_update(dead)
+
+
+def _handle_camera_ws(sock: socket.socket):
+    """Phone camera connection: receives JPEG frames, processes them, broadcasts results."""
+    print("[camera] connected")
+    frames = 0
     try:
-        table = ScoreTable.load()
-        pts = table.points(exercise, sex, age, result.summary["valid"])
-        score_info = {
-            "station_points": pts,
-            "max_station_points": 25,
-            "age": age, "sex": sex,
-            "age_band": f"{(age // 3) * 3 - 1}-{(age // 3) * 3 + 1}" if age >= 22 else "<22",
-        }
-    except Exception:
-        pass  # scoring table not available
-
-    # Build rep log
-    rep_log = []
-    for r in result.reps:
-        checks_detail = []
-        for c in r.checks:
-            checks_detail.append({
-                "name": c.name, "passed": c.passed,
-                "value": round(c.value, 2) if np.isfinite(c.value) else None,
-                "threshold": round(c.threshold, 2) if np.isfinite(c.threshold) else None,
-                "unit": c.unit,
-            })
-        rep_log.append({
-            "rep": r.index, "t_start": round(r.t_start, 2), "t_end": round(r.t_end, 2) if r.t_end else None,
-            "valid": r.valid, "in_window": r.in_window,
-            "reasons": r.reasons, "checks": checks_detail,
-        })
-
-    # Pose data for overlay (reuse the smooth track)
-    w, h = raw.size
-    clean = result.clean
-    side = profile.side
-
-    P = clean.side_points(side)
-    signals = {
-        "elbow": angle_deg(P["shoulder"], P["elbow"], P["wrist"]),
-        "hip": angle_deg(P["shoulder"], P["hip"], P["knee"]),
-        "knee": angle_deg(P["hip"], P["knee"], P["ankle"]),
-        "body": angle_deg(P["shoulder"], P["hip"], P["ankle"]),
-    }
-
-    return {
-        "clip": {k: clip[k] for k in ("id", "dataset", "name", "exercise")},
-        "exercise": exercise,
-        "fps": raw.fps, "frames": len(raw), "size": [w, h],
-        "side": side, "joints": list(JOINTS),
-        "smooth": _frames(clean), "raw": _frames(raw),
-        "signals": {k: _num(v, 1) for k, v in signals.items()},
-        "calibration": {
-            "segments": {k: [round(v[0], 2), round(v[1], 2)] for k, v in segments.items()},
-            "rom": profile.rom,
-            "warnings": profile.warnings,
-        },
-        "reps": rep_log,
-        "summary": result.summary,
-        "score": score_info,
-        "stats": {"pose_seconds": round(took, 1)},
-    }
+        while True:
+            opcode, data = _ws_recv(sock)
+            if opcode is None or opcode == 8:
+                break
+            if opcode == 2 and data:
+                try:
+                    with _session_lock:
+                        result = _session.process_frame(data)
+                    msg = json.dumps(result, separators=(",", ":"))
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
+                    continue  # bad frame or a pose-estimation hiccup; keep the connection alive
+                _broadcast_to_displays(data)  # raw JPEG frame, for the live video feed
+                _broadcast_to_displays(msg)
+                _ws_send(sock, msg)
+                frames += 1
+                if frames == 1:
+                    print("[camera] first frame processed, state=" + result["state"])
+    except (OSError, ConnectionError):
+        pass
+    finally:
+        print(f"[camera] disconnected after {frames} frame(s)")
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
 
-# ── HTTP handler ───────────────────────────────────────────────────────────
+def _handle_display_ws(sock: socket.socket):
+    """Display connection: receives control commands, gets broadcasts from camera processing."""
+    print("[display] connected", f"({len(_display_clients) + 1} total)")
+    with _display_lock:
+        _display_clients.add(sock)
+    try:
+        while True:
+            opcode, data = _ws_recv(sock)
+            if opcode is None or opcode == 8:
+                break
+            if opcode == 1 and data:
+                try:
+                    cmd = json.loads(data)
+                    with _session_lock:
+                        if cmd.get("cmd") == "reset":
+                            _session.reset()
+                        elif cmd.get("cmd") == "set_exercise":
+                            _session.set_exercise(cmd.get("exercise", "pushup"))
+                except (json.JSONDecodeError, KeyError):
+                    pass
+    except (OSError, ConnectionError):
+        pass
+    finally:
+        with _display_lock:
+            _display_clients.discard(sock)
+        print("[display] disconnected", f"({len(_display_clients)} left)")
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
+# ── HTTP handler ──────────────────────────────────────────────────────────
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ippt-dashboard"
+    server_version = "ippt-live"
 
     def log_message(self, fmt, *args):
         if args and str(args[1]).startswith(("4", "5")):
             super().log_message(fmt, *args)
 
-    def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None):
+    def _send(self, code: int, body: bytes, ctype: str):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        for k, v in (extra or {}).items():
-            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
     def _json(self, obj, code: int = 200):
         self._send(code, json.dumps(obj, separators=(",", ":")).encode(), "application/json")
 
-    def _file_range(self, path: Path, ctype: str):
-        size = path.stat().st_size
-        start, end, code = 0, size - 1, 200
-        m = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
-        if m and (m.group(1) or m.group(2)):
-            if m.group(1):
-                start = int(m.group(1))
-                end = int(m.group(2)) if m.group(2) else size - 1
-            else:
-                start = max(size - int(m.group(2)), 0)
-            end = min(end, size - 1)
-            code = 206
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Content-Length", str(end - start + 1))
-        if code == 206:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.end_headers()
-        with open(path, "rb") as f:
-            f.seek(start)
-            left = end - start + 1
-            try:
-                while left > 0 and (chunk := f.read(min(1 << 20, left))):
-                    self.wfile.write(chunk)
-                    left -= len(chunk)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-
     def do_GET(self):
         path = unquote(urlparse(self.path).path)
-        qs = parse_qs(urlparse(self.path).query)
         try:
             if path in ("/", "/index.html"):
                 return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
-            if path == "/api/clips":
-                return self._json(sorted(({k: v for k, v in c.items() if k != "path"} for c in discover().values()),
-                                         key=lambda c: (c["exercise"], c["dataset"], c["name"])))
 
-            m = re.fullmatch(r"/api/clips/([^/]+)/(pose|video|analyze)", path)
-            if m:
-                clip = discover().get(m.group(1))
-                if clip is None:
-                    return self._json({"error": "unknown clip"}, 404)
-                action = m.group(2)
-                if action == "pose":
-                    return self._json(pose_payload(clip))
-                if action == "video":
-                    fps = pose_track(clip)[0].fps
-                    return self._file_range(web_video(clip, fps), "video/mp4")
-                if action == "analyze":
-                    exercise = qs.get("exercise", [clip.get("exercise", "pushup")])[0]
-                    if exercise not in ("pushup", "situp"):
-                        return self._json({"error": "exercise must be pushup or situp"}, 400)
-                    age = int(qs.get("age", ["25"])[0])
-                    sex = qs.get("sex", ["m"])[0]
-                    return self._json(analyze_payload(clip, exercise, age, sex))
+            if path in ("/camera", "/camera.html"):
+                return self._send(200, (STATIC / "camera.html").read_bytes(), "text/html; charset=utf-8")
+
+            if path == "/api/status":
+                with _session_lock:
+                    return self._json({
+                        "state": _session.state,
+                        "exercise": _session.exercise,
+                        "rep_count": _session.rep_count,
+                        "camera_url": f"http://{_local_ip()}:8000/camera",
+                    })
+
+            # WebSocket upgrade
+            if self.headers.get("Upgrade", "").lower() == "websocket":
+                _ws_handshake(self)
+                # Flush any buffered response data
+                self.wfile.flush()
+                sock = self.request
+                sock.settimeout(None)
+                self.close_connection = True
+                try:
+                    if path == "/ws/camera":
+                        _handle_camera_ws(sock)
+                    elif path == "/ws/display":
+                        _handle_display_ws(sock)
+                except Exception:
+                    # Connection is already a raw WebSocket stream at this point;
+                    # an HTTP/JSON error response here would just corrupt it further.
+                    import traceback
+                    traceback.print_exc()
+                return
 
             self._json({"error": "not found"}, 404)
         except Exception as e:
@@ -319,57 +255,44 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self._json({"error": f"{type(e).__name__}: {e}"}, 500)
 
-    def do_POST(self):
-        path = unquote(urlparse(self.path).path)
-        try:
-            if path == "/api/upload":
-                ctype = self.headers.get("Content-Type", "")
-                if "multipart/form-data" not in ctype:
-                    return self._json({"error": "expected multipart/form-data"}, 400)
-                boundary = ctype.split("boundary=")[1].strip()
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length)
 
-                # Parse multipart
-                environ = {
-                    "REQUEST_METHOD": "POST",
-                    "CONTENT_TYPE": ctype,
-                    "CONTENT_LENGTH": str(content_length),
-                }
-                from io import BytesIO
-                fs = cgi.FieldStorage(fp=BytesIO(body), environ=environ, keep_blank_values=True)
-                file_item = fs["file"] if "file" in fs else None
-                if file_item is None or not file_item.filename:
-                    return self._json({"error": "no file uploaded"}, 400)
+# ── local IP detection ────────────────────────────────────────────────────
 
-                # Save
-                UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-                safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(file_item.filename).name)
-                dest = UPLOAD_DIR / safe_name
-                # Avoid collision
-                stem, ext = dest.stem, dest.suffix
-                i = 1
-                while dest.exists():
-                    dest = UPLOAD_DIR / f"{stem}_{i}{ext}"
-                    i += 1
-                dest.write_bytes(file_item.file.read())
-                cid = re.sub(r"[^A-Za-z0-9_.-]", "-", f"upload__{dest.stem}")
-                return self._json({"id": cid, "name": dest.name, "size_mb": round(dest.stat().st_size / 1e6, 2)})
-            self._json({"error": "not found"}, 404)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+def _local_ip() -> str:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return "127.0.0.1"
 
 
-def serve(host: str = "127.0.0.1", port: int = 8000, open_browser: bool = True) -> None:
+def serve(host: str = "0.0.0.0", port: int = 8000, open_browser: bool = True) -> None:
+    # Without this, prints from connection-handler threads can sit in a buffer
+    # and never show up when stdout isn't a live terminal (e.g. piped/redirected).
+    import sys
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
     srv = ThreadingHTTPServer((host, port), Handler)
     srv.daemon_threads = True
-    url = f"http://{host}:{port}/"
-    print(f"IPPT dashboard on {url}  ({len(discover())} clips; Ctrl+C to stop)")
+    ip = _local_ip()
+    print(f"\n  IPPT Live Dashboard")
+    print(f"  Display (PC):    http://127.0.0.1:{port}/")
+    print(f"  Camera (phone):  http://{ip}:{port}/camera")
+    print()
+    print(f"  Phone camera setup (one-time):")
+    print(f"    1. Open chrome://flags on your phone")
+    print(f"    2. Search: 'insecure origins'")
+    print(f"    3. Add: http://{ip}:{port}")
+    print(f"    4. Relaunch Chrome")
+    print(f"\n  Ctrl+C to stop\n")
     if open_browser:
         import webbrowser
-        threading.Timer(0.5, webbrowser.open, args=(url,)).start()
+        threading.Timer(0.5, webbrowser.open, args=(f"http://127.0.0.1:{port}/",)).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
