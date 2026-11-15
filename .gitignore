@@ -16,3 +16,5 @@ runs/
 .env
 kaggle.json
 *.avi
+
+!src/ippt/dashboard/static/demo/*.mp4

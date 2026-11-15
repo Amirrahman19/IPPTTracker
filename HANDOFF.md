@@ -45,3 +45,7 @@ Current state per last recorded session: see 'Verified / Not verified' and B&A.m
 - `MVP.md`, `B&A.md`
 - Memory record: `Claude Vault\Memory\Log - Software and Data Projects.md` (see the project record)
 - `Claude Vault\Agent Harness\README.md` (skills), `Claude Vault\Memory\README.md`
+
+## Landing demo (2026-11-15, latest)
+Public `/` plays `static/demo/demo.mp4` (+ `demo.json` skeleton/signal/rep times) on a loop with skeleton overlay, rep counter and graph whenever no phone is streaming ("Demo" pill + badge); live frames take over instantly and the demo resumes after 4 s of silence. Regenerate/swap with `python scripts/make_demo.py <clip in data/interim/web>`. Recordings section is hidden when the server has no clips. **Open item:** the demo clip is `workout_vids_pushup__push-up_9.mp4` (Kaggle workout-videos set, licence unchecked, identifiable person) (superseded, see below).
+**Demo clip now HMDB51 `pushup_test_00880` (CC BY 4.0, via Hugging Face `mteb/HMDB51`)**; credit shown on the page under the demo. The earlier `workout-vids` clip (no licence, do-not-redistribute) was removed before anything was pushed; user will add other clips later via `scripts/make_demo.py`.

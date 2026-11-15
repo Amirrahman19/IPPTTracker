@@ -20,6 +20,21 @@ body { background: var(--bg); color: var(--fg); font-family: 'Segoe UI', system-
 .section-title small { text-transform: none; letter-spacing: 0; font-size: 12px; }
 .live-wrap { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 
+/* ── hero + demo ── */
+.hero { padding: 20px 24px 12px; }
+.hero h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin-bottom: 6px; }
+.hero p { color: var(--fg2); font-size: 14px; max-width: 760px; line-height: 1.6; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.chip { font-size: 12px; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--border); color: var(--fg); background: var(--card); }
+.demo-badge { position: absolute; top: 12px; left: 12px; z-index: 3; font-size: 12px; padding: 6px 12px;
+              border-radius: 8px; background: rgba(0,0,0,0.65); color: #ce93d8; border: 1px solid rgba(171,71,188,0.5);
+              pointer-events: none; max-width: calc(100% - 24px); display: none; }
+.demo-badge.on { display: block; }
+.demo-credit { position: absolute; right: 12px; bottom: 12px; z-index: 3; font-size: 11px; color: var(--fg2);
+               background: rgba(0,0,0,0.6); padding: 3px 8px; border-radius: 6px; display: none; }
+.demo-credit a { color: var(--accent); }
+.demo-credit.on { display: block; }
+
 /* ── recordings ── */
 .rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
             gap: 12px; padding: 4px 24px 24px; }
@@ -51,6 +66,7 @@ body { background: var(--bg); color: var(--fg); font-family: 'Segoe UI', system-
 .pill.waiting { background: rgba(255,202,40,0.15); color: var(--amber); }
 .pill.calibrating { background: rgba(79,195,247,0.15); color: var(--accent); }
 .pill.counting { background: rgba(102,187,106,0.15); color: var(--green); }
+.pill.demo { background: rgba(171,71,188,0.18); color: #ce93d8; }
 .pill.disconnected { background: rgba(239,83,80,0.15); color: var(--red); }
 .spacer { flex: 1; }
 select, button { background: var(--bg2); color: var(--fg); border: 1px solid var(--border);
@@ -176,16 +192,28 @@ button.primary { background: var(--accent); color: #000; border-color: var(--acc
   </div>
 </div>
 
-<div class="section-title">Live detection <small>shows automatically once a phone is connected</small></div>
+<div class="hero">
+  <h2>Real-time push-up &amp; sit-up counting</h2>
+  <p>Computer-vision IPPT tracker: pose estimation overlays a skeleton on the athlete, calibrates to their range of motion
+     and counts valid reps as they happen. Below is the live detection view, shown here with a demo clip until a phone camera connects.</p>
+  <div class="chips">
+    <span class="chip">Pose estimation overlay</span><span class="chip">Automatic calibration</span>
+    <span class="chip">Live rep counting</span><span class="chip">Angle graph</span><span class="chip">Phone as wireless camera</span>
+  </div>
+</div>
+<div class="section-title">Live detection <small id="liveSub">demo clip until a phone connects</small></div>
 <div class="live-wrap">
 <div class="main">
   <div class="skeleton-area" id="skelArea">
     <canvas id="videoCanvas"></canvas>
+    <video id="demoVideo" muted playsinline loop preload="auto" style="display:none"></video>
     <canvas id="skelCanvas"></canvas>
     <div class="no-feed" id="noFeed">
       <div>No live camera connected.</div>
       <div>Press <b>Connect phone</b> above to stream live,<br>or open a recording below.</div>
     </div>
+    <div class="demo-badge" id="demoBadge">DEMO &middot; recorded clip through the same pose + counting display. Press Connect phone to go live.</div>
+    <div class="demo-credit" id="demoCredit">Demo footage: <a href="https://huggingface.co/datasets/mteb/HMDB51" target="_blank" rel="noopener">HMDB51</a> dataset (Hugging Face), CC BY 4.0</div>
     <div class="state-overlay" id="stateOverlay"></div>
     <div class="calib-bar" id="calibBar" style="width:0"></div>
     <button class="panel-toggle" id="panelToggle" title="Toggle panel">&#9654;</button>
@@ -210,9 +238,10 @@ button.primary { background: var(--accent); color: #000; border-color: var(--acc
 </div>
 </div>
 
+<div id="recSection" style="display:none">
 <div class="section-title">Recordings <small id="recCount"></small></div>
 <div class="rec-grid" id="recGrid"></div>
-<div class="rec-empty" id="recEmpty" style="display:none">No recordings available on this server yet.</div>
+</div>
 
 <div class="modal" id="viewerModal" role="dialog" aria-modal="true">
   <div class="viewer-card">
@@ -324,16 +353,17 @@ function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws/display`);
   ws.binaryType = 'arraybuffer';
-  ws.onopen = () => updatePill('waiting');
+  ws.onopen = () => { if (!demoActive) updatePill('waiting'); };
   ws.onmessage = (e) => {
     if (e.data instanceof ArrayBuffer) drawVideoFrame(e.data);
     else { try { onFrame(JSON.parse(e.data)); } catch {} }
   };
-  ws.onclose = () => { updatePill('disconnected'); setTimeout(connectWS, 2000); };
+  ws.onclose = () => { if (!demoActive) updatePill('disconnected'); setTimeout(connectWS, 2000); };
   ws.onerror = () => ws.close();
 }
 
 async function drawVideoFrame(buf) {
+  liveSeen();
   let bmp;
   try {
     bmp = await createImageBitmap(new Blob([buf], { type: 'image/jpeg' }));
@@ -357,11 +387,12 @@ async function drawVideoFrame(buf) {
 
 function updatePill(state) {
   statePill.className = 'pill ' + state;
-  const labels = { waiting: 'Waiting', calibrating: 'Calibrating', counting: 'Counting', disconnected: 'No Camera' };
+  const labels = { waiting: 'Waiting', calibrating: 'Calibrating', counting: 'Counting', disconnected: 'No Camera', demo: 'Demo' };
   statePill.textContent = labels[state] || state;
 }
 
 function onFrame(d) {
+  liveSeen();
   if (!hasData) {
     hasData = true;
     noFeed.style.display = 'none';
@@ -402,7 +433,7 @@ function onFrame(d) {
   drawGraph();
 }
 
-function drawSkeleton(joints, side) {
+function drawSkeleton(joints, side, map) {
   const area = document.getElementById('skelArea');
   const dpr = window.devicePixelRatio || 1;
   const w = area.clientWidth, h = area.clientHeight;
@@ -412,7 +443,7 @@ function drawSkeleton(joints, side) {
   skelCtx.clearRect(0, 0, w, h);
   if (!joints || !joints.length) return;
 
-  const pts = joints.map(j => j ? [j[0] * w, j[1] * h] : null);
+  const pts = joints.map(j => j ? (map ? map(j) : [j[0] * w, j[1] * h]) : null);
 
   for (const [a, b] of BONES) {
     if (!pts[a] || !pts[b]) continue;
@@ -496,6 +527,94 @@ btnReset.addEventListener('click', () => {
   counterSub.textContent = 'Hold starting position...';
 });
 
+// ── Landing demo: a recorded clip drawn with its skeleton + rep counter ──
+// Runs whenever no live camera is streaming; live frames take over instantly.
+const demoVideo = document.getElementById('demoVideo');
+const demoBadge = document.getElementById('demoBadge');
+let demo = null, demoActive = false, lastLiveAt = 0, demoCount = 0;
+const LIVE_TIMEOUT_MS = 4000;
+
+function liveSeen() {
+  lastLiveAt = performance.now();
+  if (demoActive) stopDemo();
+}
+
+function stopDemo() {
+  demoActive = false;
+  demoVideo.pause();
+  demoBadge.classList.remove('on');
+  document.getElementById('demoCredit').classList.remove('on');
+  document.getElementById('liveSub').textContent = 'live from the connected phone';
+  signalHistory = [];
+  counterNum.textContent = '0';
+  stateOverlay.textContent = '';
+}
+
+function startDemo() {
+  if (!demo || demoActive) return;
+  demoActive = true;
+  demoCount = 0;
+  noFeed.style.display = 'none';
+  demoBadge.classList.add('on');
+  document.getElementById('demoCredit').classList.add('on');
+  document.getElementById('liveSub').textContent = 'demo clip until a phone connects';
+  signalLabel.textContent = demo.signal_label;
+  updatePill('demo');
+  demoVideo.play().catch(() => {});
+  requestAnimationFrame(demoTick);
+}
+
+function demoTick() {
+  if (!demoActive) return;
+  const area = document.getElementById('skelArea');
+  const dpr = window.devicePixelRatio || 1;
+  const w = area.clientWidth, h = area.clientHeight;
+  const vw = demoVideo.videoWidth, vh = demoVideo.videoHeight;
+  if (vw && w && h) {
+    videoCanvas.width = w * dpr; videoCanvas.height = h * dpr;
+    videoCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    videoCtx.clearRect(0, 0, w, h);
+    // "contain" keeps the whole athlete visible; the same transform places the skeleton
+    const scale = Math.min(w / vw, h / vh);
+    const dw = vw * scale, dh = vh * scale, ox = (w - dw) / 2, oy = (h - dh) / 2;
+    videoCtx.drawImage(demoVideo, ox, oy, dw, dh);
+
+    const tNow = demoVideo.currentTime;
+    let i = demo.t.length - 1;
+    for (let k = 0; k < demo.t.length; k++) { if (demo.t[k] >= tNow) { i = k; break; } }
+    drawSkeleton(demo.joints[i], demo.side, (j) => [ox + j[0] * dw, oy + j[1] * dh]);
+
+    const reps = demo.rep_times.filter(t => t <= tNow).length;
+    if (reps > demoCount) { counterNum.classList.add('flash'); setTimeout(() => counterNum.classList.remove('flash'), 300); }
+    demoCount = reps;
+    counterNum.textContent = reps;
+    const hist = demo.signal.filter(p => p[0] <= tNow);
+    signalHistory = hist.slice(-120);
+    if (hist.length) {
+      const v = hist[hist.length - 1][1];
+      signalValue.textContent = Math.round(v) + '\u00b0';
+      const vals = demo.signal.map(p => p[1]);
+      const mid = (Math.min(...vals) + Math.max(...vals)) / 2;
+      counterSub.textContent = v < mid ? 'Going down...' : 'Ready';
+    }
+    drawGraph();
+  }
+  requestAnimationFrame(demoTick);
+}
+
+// resume the demo when the live feed has been quiet for a while
+setInterval(() => {
+  if (!demoActive && demo && performance.now() - lastLiveAt > LIVE_TIMEOUT_MS) startDemo();
+}, 1000);
+
+(async () => {
+  try {
+    demo = await (await fetch('/demo/demo.json')).json();
+    demoVideo.src = '/demo/demo.mp4';
+    startDemo();
+  } catch { /* no demo assets: the empty-state message stays */ }
+})();
+
 // ── Recordings library ──
 const recGrid = document.getElementById('recGrid');
 const viewerModal = document.getElementById('viewerModal');
@@ -508,7 +627,7 @@ async function loadRecordings() {
   let list = [];
   try { list = await (await fetch('/api/recordings')).json(); } catch {}
   document.getElementById('recCount').textContent = list.length ? `${list.length} clip${list.length > 1 ? 's' : ''}` : '';
-  document.getElementById('recEmpty').style.display = list.length ? 'none' : 'block';
+  document.getElementById('recSection').style.display = list.length ? 'block' : 'none';
   recGrid.textContent = '';
   for (const r of list) {
     const card = document.createElement('button');

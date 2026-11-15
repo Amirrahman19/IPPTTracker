@@ -281,6 +281,12 @@ class Handler(BaseHTTPRequestHandler):
                     body["camera_url"] = f"http://{_local_ip()}:{self.server.server_address[1]}/camera"
                 return self._json(body)
 
+            if path in ("/demo/demo.mp4", "/demo/demo.json"):
+                f = STATIC / path[1:]
+                if not f.is_file():
+                    return self._json({"error": "not found"}, 404)
+                return self._send_file(f, "video/mp4" if path.endswith(".mp4") else "application/json")
+
             if path == "/api/recordings":
                 from . import recordings
                 return self._json(recordings.list_recordings())

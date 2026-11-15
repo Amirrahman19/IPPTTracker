@@ -52,3 +52,17 @@
 - **Why:** User wanted a dashboard first (recordings + live), phone connect on demand.
 - **MVP alignment:** Dashboard + recorded-footage MUSTs; phone path preserved.
 - **Verified / Not verified:** Verified locally: 10 clips listed, playback + seek (206), traversal blocked (404), rep estimates computed, viewer UI, 30 tests pass. Not verified: real phone live stream, Render (no clips there: data is git-ignored), sit-up estimate accuracy (clip gave 0 reps).
+
+### 2026-11-15 — Landing page demo with skeleton + counting
+- **Before:** Public page showed an empty "No live camera" panel and an (empty on Render) recordings list.
+- **Change (what/how):** `index.html` demo mode (video drawn to canvas, precomputed skeleton, counter, graph, hero + feature chips); `scripts/make_demo.py`; `/demo/*` routes; `.gitignore`/`.dockerignore` exceptions for the demo mp4; recordings estimate now self-calibrates ROM from the clip; recordings section hidden when empty.
+- **Why:** User wants visitors to see live-style pose estimation and counting as marketing for the project.
+- **MVP alignment:** Dashboard MUST; live path and Connect phone untouched.
+- **Verified / Not verified:** Verified locally: demo plays with skeleton, count reaches 2 per loop, live frame takeover and demo resume, 30 tests pass. Not verified: Render deploy, mobile layout, demo-clip licence.
+
+### 2026-11-15 — Demo clip swapped to licensed footage
+- **Before:** Demo used the `workout-vids` clip (no licence stated; registry says do not redistribute).
+- **Change (what/how):** Rebuilt demo from HMDB51 `pushup_test_00880` (CC BY 4.0) via `scripts/make_demo.py`; added on-page credit with link; pushed.
+- **Why:** User asked for an attribution note; the original clip could not be credited as open source.
+- **MVP alignment:** Public marketing demo requirement kept; licensing constraint respected.
+- **Verified / Not verified:** Verified locally: demo shows a single side-view athlete, skeleton, 3 reps, credit visible; 30 tests pass. Not verified: Render deploy, phone layout.

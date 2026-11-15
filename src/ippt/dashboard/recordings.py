@@ -100,6 +100,12 @@ def analyse(name: str) -> dict | None:
             seg = rules["segmentation"]
             sig = _signal(seq, side, seg["signal"])
             lo, hi = seg["default_rom"]["lo"], seg["default_rom"]["hi"]
+            finite = sig[~np.isnan(sig)]
+            if len(finite) > 10:
+                # Self-calibrate: use the clip's own range of motion when it is wide enough to be real.
+                p_lo, p_hi = float(np.percentile(finite, 5)), float(np.percentile(finite, 95))
+                if p_hi - p_lo >= 30:
+                    lo, hi = p_lo, p_hi
             rom = hi - lo
             if seg["direction"] == "below":
                 counter = StreamingRepCounter(high=hi - seg["exit_frac"] * rom, low=hi - seg["enter_frac"] * rom)
@@ -115,7 +121,7 @@ def analyse(name: str) -> dict | None:
                        for t, v in zip(seq.t[::step], sig[::step]) if not np.isnan(v)]
             result.update(available=True, side=side, rep_count=len(reps), rep_times=reps,
                           signal=history, signal_label="Elbow angle" if exercise == "pushup" else "Torso angle",
-                          note="Estimate using default range of motion (no per-person calibration).")
+                          note="Estimate: range of motion taken from the clip itself, not an official calibration.")
         except Exception:
             import traceback
             traceback.print_exc()

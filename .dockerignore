@@ -9,3 +9,6 @@ docs/
 *.mov
 *.avi
 *.npz
+
+!src/ippt/dashboard/static/demo/
+!src/ippt/dashboard/static/demo/*.mp4
