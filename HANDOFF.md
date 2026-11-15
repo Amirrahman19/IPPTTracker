@@ -1,6 +1,8 @@
 # HANDOFF — IPPTTracker
 
-_Last updated: 2026-10-28 · by: backfill script (reconstructed; refresh on first real session)_
+_Last updated: 2026-11-15 · by: Claude (public dashboard + Connect phone session)_
+
+**2026-11-15 update:** `/` is the public dashboard (panel open by default). A "Connect phone" button in the nav bar opens a dialog with the camera link. `/api/status` returns the LAN `camera_url` only to direct loopback viewers (no `X-Forwarded-For`); everyone else gets `location.origin/camera`. 500 errors no longer echo exception text. Run locally with `C:\Users\Amir Rahman\anaconda3\envs\ippt\python.exe -m ippt.cli dashboard --no-browser`. **Privacy caveat:** anyone with the URL still sees the live video feed and can press Reset / change exercise — consider an optional admin token if the site is public.
 
 ## Status in one paragraph
 Current state per last recorded session: see 'Verified / Not verified' and B&A.md. Baseline before Claude work: Empty scaffold from the planning chat (earlier folder in COMPETITIONS\IPPT was deleted).

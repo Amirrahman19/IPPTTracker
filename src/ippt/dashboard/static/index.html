@@ -28,6 +28,22 @@ body { background: var(--bg); color: var(--fg); font-family: 'Segoe UI', system-
 select, button { background: var(--bg2); color: var(--fg); border: 1px solid var(--border);
                  padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; }
 button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+
+/* ── connect-phone modal ── */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 50;
+         display: none; align-items: center; justify-content: center; padding: 16px; }
+.modal.open { display: flex; }
+.modal-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+              padding: 24px; max-width: 440px; width: 100%; line-height: 1.6; }
+.modal-card h2 { font-size: 18px; margin-bottom: 12px; }
+.modal-card ol { margin: 0 0 16px 20px; color: var(--fg2); font-size: 14px; }
+.modal-card .url { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 14px;
+                   color: var(--accent); background: var(--bg); border: 1px solid var(--border);
+                   border-radius: 6px; padding: 10px; word-break: break-all; margin-bottom: 12px;
+                   user-select: all; }
+.modal-card .note { font-size: 12px; color: var(--fg2); margin-bottom: 16px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
 /* ── main area ── */
 .main { flex: 1; display: flex; min-height: 0; }
@@ -109,6 +125,25 @@ button:hover { border-color: var(--accent); }
     <option value="situp">Sit-up</option>
   </select>
   <button id="btnReset">Reset</button>
+  <button id="btnConnect" class="primary">Connect phone</button>
+</div>
+
+<div class="modal" id="connectModal" role="dialog" aria-modal="true" aria-labelledby="connectTitle">
+  <div class="modal-card">
+    <h2 id="connectTitle">Connect your phone camera</h2>
+    <ol>
+      <li>Open this link on your phone.</li>
+      <li>Allow camera access and tap Start.</li>
+      <li>Prop the phone side-on, then hold the starting position still.</li>
+    </ol>
+    <div class="url" id="cameraUrl">loading...</div>
+    <div class="note" id="connectNote"></div>
+    <div class="modal-actions">
+      <button id="btnCopy">Copy link</button>
+      <button id="btnOpenCam" class="primary">Open camera page</button>
+      <button id="btnClose">Close</button>
+    </div>
+  </div>
 </div>
 
 <div class="main">
@@ -116,16 +151,15 @@ button:hover { border-color: var(--accent); }
     <canvas id="videoCanvas"></canvas>
     <canvas id="skelCanvas"></canvas>
     <div class="no-feed" id="noFeed">
-      <div>Open on your phone:</div>
-      <div class="url" id="cameraUrl">loading...</div>
-      <div>Point the side-view camera at yourself,<br>then hold the starting position still.</div>
+      <div>No camera connected yet.</div>
+      <div>Press <b>Connect phone</b> above to start streaming.</div>
     </div>
     <div class="state-overlay" id="stateOverlay"></div>
     <div class="calib-bar" id="calibBar" style="width:0"></div>
-    <button class="panel-toggle" id="panelToggle" title="Toggle panel">&#9664;</button>
+    <button class="panel-toggle" id="panelToggle" title="Toggle panel">&#9654;</button>
   </div>
 
-  <div class="right collapsed" id="rightPanel">
+  <div class="right" id="rightPanel">
     <div class="counter-section">
       <div class="counter-num" id="counterNum">0</div>
       <div class="counter-label">Valid Reps</div>
@@ -189,11 +223,40 @@ let lastFpsTime = performance.now();
 let lastFpsCount = 0;
 let signalHistory = [];
 
-// Show camera URL — fetch the real LAN IP from the server
-fetch('/api/status').then(r => r.json()).then(d => {
-  if (d.camera_url) cameraUrl.textContent = d.camera_url;
-  else cameraUrl.textContent = location.origin + '/camera';
-}).catch(() => { cameraUrl.textContent = location.origin + '/camera'; });
+// Connect-phone dialog. The server only sends a LAN address to someone on the
+// host machine itself; everyone else just gets a link on the site they're on.
+const connectModal = document.getElementById('connectModal');
+const connectNote = document.getElementById('connectNote');
+let cameraLink = location.origin + '/camera';
+
+function showCameraLink() {
+  cameraUrl.textContent = cameraLink;
+  const insecureLan = location.protocol === 'http:' && !['localhost', '127.0.0.1'].includes(location.hostname);
+  const localOnly = location.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(location.hostname);
+  connectNote.textContent = (insecureLan || localOnly)
+    ? 'Phone and computer must be on the same Wi-Fi. Over plain http, Chrome on the phone may need this site added under chrome://flags → "Insecure origins treated as secure".'
+    : '';
+}
+
+document.getElementById('btnConnect').addEventListener('click', async () => {
+  cameraUrl.textContent = 'loading...';
+  connectModal.classList.add('open');
+  try {
+    const d = await (await fetch('/api/status')).json();
+    if (d.camera_url) cameraLink = d.camera_url;
+  } catch {}
+  showCameraLink();
+});
+const closeModal = () => connectModal.classList.remove('open');
+document.getElementById('btnClose').addEventListener('click', closeModal);
+connectModal.addEventListener('click', (e) => { if (e.target === connectModal) closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+document.getElementById('btnOpenCam').addEventListener('click', () => { window.open(cameraLink, '_blank', 'noopener'); });
+document.getElementById('btnCopy').addEventListener('click', async (e) => {
+  try { await navigator.clipboard.writeText(cameraLink); e.target.textContent = 'Copied'; }
+  catch { e.target.textContent = 'Select & copy above'; }
+  setTimeout(() => { e.target.textContent = 'Copy link'; }, 1500);
+});
 
 // Panel toggle
 panelToggle.addEventListener('click', () => {
@@ -222,8 +285,6 @@ async function drawVideoFrame(buf) {
   if (!hasData) {
     hasData = true;
     noFeed.style.display = 'none';
-    rightPanel.classList.remove('collapsed');
-    panelToggle.innerHTML = '&#9654;';
   }
   const area = document.getElementById('skelArea');
   const dpr = window.devicePixelRatio || 1;
@@ -248,8 +309,6 @@ function onFrame(d) {
   if (!hasData) {
     hasData = true;
     noFeed.style.display = 'none';
-    rightPanel.classList.remove('collapsed');
-    panelToggle.innerHTML = '&#9654;';
   }
 
   frameCount++;

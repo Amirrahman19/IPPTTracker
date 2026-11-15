@@ -38,3 +38,10 @@
 | 2026-09-24 | `66136b3` | Initial commit |
 
 ## New entries below this line
+
+### 2026-11-15 — Public dashboard + Connect phone button, IP hidden
+- **Before:** Dashboard landing page showed the server's LAN IP URL to every visitor in the main view; panel collapsed until data arrived; 500 responses echoed exception text.
+- **Change (what/how):** `index.html`: panel open by default, "Connect phone" nav button + modal (copy/open link, no IP in page text). `server.py`: `/api/status` includes `camera_url` (LAN IP) only for direct loopback clients; generic 500 error body.
+- **Why:** User: dashboard visible to anyone opening the site, phone connect via button, hide IP/sensitive info.
+- **MVP alignment:** Phone camera over LAN + dashboard MUSTs preserved; no scoring changes.
+- **Verified / Not verified:** Verified locally: server starts, `/api/status` shows `camera_url` on loopback and omits it with `X-Forwarded-For`, page renders, modal opens with the LAN link. Not verified: real phone stream, Render deployment after push, behind-proxy behaviour on Render.

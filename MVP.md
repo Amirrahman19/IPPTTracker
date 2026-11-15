@@ -34,3 +34,4 @@ The user and trainees; phone as wireless camera, laptop as display.
 | Date | Requested by | Change | Status |
 |---|---|---|---|
 | 2026-10-28 | system | Backfilled MVP from history | done |
+| 2026-11-15 | user | Dashboard shown to anyone who opens the site; "Connect phone" button in nav bar; hide IP address and other sensitive info; deploy locally, check, commit and push | done (local-verified; Render redeploys on push) |

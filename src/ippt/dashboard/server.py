@@ -211,6 +211,12 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, code: int = 200):
         self._send(code, json.dumps(obj, separators=(",", ":")).encode(), "application/json")
 
+    def _is_local_viewer(self) -> bool:
+        """True only for a direct loopback connection (not via a reverse proxy)."""
+        if self.headers.get("X-Forwarded-For") or self.headers.get("Forwarded"):
+            return False
+        return self.client_address[0] in ("127.0.0.1", "::1")
+
     def do_GET(self):
         path = unquote(urlparse(self.path).path)
         try:
@@ -222,12 +228,17 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/status":
                 with _session_lock:
-                    return self._json({
+                    body = {
                         "state": _session.state,
                         "exercise": _session.exercise,
                         "rep_count": _session.rep_count,
-                        "camera_url": f"http://{_local_ip()}:8000/camera",
-                    })
+                    }
+                # The LAN address is only useful (and only revealed) to someone
+                # on the host machine itself, so they can hand it to a phone.
+                # Remote visitors never see it; the page uses its own origin.
+                if self._is_local_viewer():
+                    body["camera_url"] = f"http://{_local_ip()}:{self.server.server_address[1]}/camera"
+                return self._json(body)
 
             # WebSocket upgrade
             if self.headers.get("Upgrade", "").lower() == "websocket":
@@ -253,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+            self._json({"error": "internal error"}, 500)  # details stay in server logs
 
 
 # ── local IP detection ────────────────────────────────────────────────────
