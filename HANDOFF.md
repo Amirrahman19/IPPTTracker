@@ -1,6 +1,8 @@
 # HANDOFF — IPPTTracker
 
-_Last updated: 2026-11-15 · by: Claude (public dashboard + Connect phone session)_
+_Last updated: 2026-11-15 · by: Claude (dashboard home: recordings + live)_
+
+**Home page (latest):** `/` is a dashboard: Live detection panel (fills when a phone connects) + Recordings library (click a clip -> video, estimated rep count synced to playback, signal graph). Recordings come from `data/interim/web/*.mp4` (override `IPPT_RECORDINGS_DIR`) with pose in `data/interim/pose/*.npz`; both are git-ignored so Render shows an empty library. Rep counts there are estimates (default ROM, no calibration; sit-up estimates are weak). New: `src/ippt/dashboard/recordings.py`, routes `/api/recordings`, `/api/recordings/<name>`, `/media/<name>` (Range supported).
 
 **2026-11-15 update:** `/` is the public dashboard (panel open by default). A "Connect phone" button in the nav bar opens a dialog with the camera link. `/api/status` returns the LAN `camera_url` only to direct loopback viewers (no `X-Forwarded-For`); everyone else gets `location.origin/camera`. 500 errors no longer echo exception text. Run locally with `C:\Users\Amir Rahman\anaconda3\envs\ippt\python.exe -m ippt.cli dashboard --no-browser`. **Privacy caveat:** anyone with the URL still sees the live video feed and can press Reset / change exercise — consider an optional admin token if the site is public.
 

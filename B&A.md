@@ -45,3 +45,10 @@
 - **Why:** User: dashboard visible to anyone opening the site, phone connect via button, hide IP/sensitive info.
 - **MVP alignment:** Phone camera over LAN + dashboard MUSTs preserved; no scoring changes.
 - **Verified / Not verified:** Verified locally: server starts, `/api/status` shows `camera_url` on loopback and omits it with `X-Forwarded-For`, page renders, modal opens with the LAN link. Not verified: real phone stream, Render deployment after push, behind-proxy behaviour on Render.
+
+### 2026-11-15 — Dashboard home with recordings + live detection
+- **Before:** Main page was the live view only; recordings were not browsable in the UI.
+- **Change (what/how):** New `dashboard/recordings.py` + routes (`/api/recordings`, analysis, `/media/` with Range, filename allow-list). `index.html`: Live detection section, Recordings grid, viewer modal (video, synced rep count, signal graph). "Connect phone" unchanged, optional.
+- **Why:** User wanted a dashboard first (recordings + live), phone connect on demand.
+- **MVP alignment:** Dashboard + recorded-footage MUSTs; phone path preserved.
+- **Verified / Not verified:** Verified locally: 10 clips listed, playback + seek (206), traversal blocked (404), rep estimates computed, viewer UI, 30 tests pass. Not verified: real phone live stream, Render (no clips there: data is git-ignored), sit-up estimate accuracy (clip gave 0 reps).

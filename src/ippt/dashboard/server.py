@@ -208,6 +208,47 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_file(self, path: Path, ctype: str):
+        """Serve a file with HTTP Range support (browsers need it to seek video)."""
+        size = path.stat().st_size
+        start, end, code = 0, size - 1, 200
+        rng = self.headers.get("Range", "")
+        if rng.startswith("bytes="):
+            try:
+                a, _, b = rng[6:].partition("-")
+                if a == "":
+                    start = max(size - int(b), 0)
+                else:
+                    start = int(a)
+                    end = min(int(b), size - 1) if b else size - 1
+                if start > end or start >= size:
+                    raise ValueError
+                code = 206
+            except ValueError:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if code == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        try:
+            with open(path, "rb") as f:
+                f.seek(start)
+                left = end - start + 1
+                while left > 0:
+                    chunk = f.read(min(1 << 16, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass  # viewer seeked or closed the video mid-transfer
+
     def _json(self, obj, code: int = 200):
         self._send(code, json.dumps(obj, separators=(",", ":")).encode(), "application/json")
 
@@ -239,6 +280,22 @@ class Handler(BaseHTTPRequestHandler):
                 if self._is_local_viewer():
                     body["camera_url"] = f"http://{_local_ip()}:{self.server.server_address[1]}/camera"
                 return self._json(body)
+
+            if path == "/api/recordings":
+                from . import recordings
+                return self._json(recordings.list_recordings())
+
+            if path.startswith("/api/recordings/"):
+                from . import recordings
+                res = recordings.analyse(path[len("/api/recordings/"):])
+                return self._json(res) if res is not None else self._json({"error": "not found"}, 404)
+
+            if path.startswith("/media/"):
+                from . import recordings
+                f = recordings.media_path(path[len("/media/"):])
+                if f is None:
+                    return self._json({"error": "not found"}, 404)
+                return self._send_file(f, "video/mp4")
 
             # WebSocket upgrade
             if self.headers.get("Upgrade", "").lower() == "websocket":

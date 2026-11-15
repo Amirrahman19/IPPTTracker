@@ -11,9 +11,37 @@
   --card: #16161f; --border: #2a2a3a;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { height: 100%; overflow: hidden; }
-body { background: var(--bg); color: var(--fg); font-family: 'Segoe UI', system-ui, sans-serif;
-       display: flex; flex-direction: column; }
+html, body { min-height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: 'Segoe UI', system-ui, sans-serif; }
+
+/* ── page sections ── */
+.section-title { font-size: 13px; text-transform: uppercase; letter-spacing: 2px; color: var(--fg2);
+                 padding: 16px 24px 8px; display: flex; align-items: baseline; gap: 12px; }
+.section-title small { text-transform: none; letter-spacing: 0; font-size: 12px; }
+.live-wrap { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+
+/* ── recordings ── */
+.rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 12px; padding: 4px 24px 24px; }
+.rec-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+            padding: 14px; cursor: pointer; text-align: left; color: var(--fg); }
+.rec-card:hover { border-color: var(--accent); }
+.rec-card .t { font-weight: 600; font-size: 14px; margin-bottom: 6px; text-transform: capitalize; }
+.rec-card .m { font-size: 12px; color: var(--fg2); display: flex; gap: 8px; flex-wrap: wrap; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; background: rgba(79,195,247,0.15); color: var(--accent); }
+.tag.situp { background: rgba(255,202,40,0.15); color: var(--amber); }
+.rec-empty { padding: 4px 24px 32px; color: var(--fg2); font-size: 14px; }
+.viewer-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+               width: 100%; max-width: 920px; max-height: 94vh; overflow: auto; padding: 16px; }
+.viewer-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.viewer-head h2 { font-size: 16px; text-transform: capitalize; flex: 1; }
+.viewer-body { display: flex; gap: 16px; flex-wrap: wrap; }
+.viewer-body video { flex: 2 1 380px; min-width: 0; width: 100%; background: #000; border-radius: 8px; max-height: 60vh; }
+.viewer-side { flex: 1 1 240px; min-width: 220px; }
+.viewer-side .big { font-size: 80px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+.viewer-side .note { font-size: 12px; color: var(--fg2); margin: 8px 0; }
+.viewer-graph { height: 140px; margin-top: 8px; }
+.viewer-graph canvas { width: 100%; height: 100%; }
 
 /* ── top bar ── */
 .top-bar { flex-shrink: 0; padding: 10px 24px; display: flex; align-items: center; gap: 12px;
@@ -46,7 +74,7 @@ button.primary { background: var(--accent); color: #000; border-color: var(--acc
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
 /* ── main area ── */
-.main { flex: 1; display: flex; min-height: 0; }
+.main { height: 60vh; min-height: 400px; display: flex; }
 
 /* ── skeleton area ── */
 .skeleton-area { flex: 1; position: relative; background: #000; display: flex;
@@ -102,7 +130,9 @@ button.primary { background: var(--accent); color: #000; border-color: var(--acc
 
 /* ── mobile ── */
 @media (max-width: 700px) {
-  .main { flex-direction: column; }
+  .main { flex-direction: column; height: auto; }
+  .skeleton-area { min-height: 50vh; flex: none; }
+  .rec-grid, .section-title { padding-left: 12px; padding-right: 12px; }
   .right { width: 100% !important; flex-shrink: 0; max-height: 220px;
            border-left: none; border-top: 1px solid var(--border); flex-direction: row; }
   .right.collapsed { max-height: 0; border-top-color: transparent; }
@@ -146,13 +176,15 @@ button.primary { background: var(--accent); color: #000; border-color: var(--acc
   </div>
 </div>
 
+<div class="section-title">Live detection <small>shows automatically once a phone is connected</small></div>
+<div class="live-wrap">
 <div class="main">
   <div class="skeleton-area" id="skelArea">
     <canvas id="videoCanvas"></canvas>
     <canvas id="skelCanvas"></canvas>
     <div class="no-feed" id="noFeed">
-      <div>No camera connected yet.</div>
-      <div>Press <b>Connect phone</b> above to start streaming.</div>
+      <div>No live camera connected.</div>
+      <div>Press <b>Connect phone</b> above to stream live,<br>or open a recording below.</div>
     </div>
     <div class="state-overlay" id="stateOverlay"></div>
     <div class="calib-bar" id="calibBar" style="width:0"></div>
@@ -172,6 +204,30 @@ button.primary { background: var(--accent); color: #000; border-color: var(--acc
       </div>
       <div class="graph-wrap">
         <canvas id="graphCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="section-title">Recordings <small id="recCount"></small></div>
+<div class="rec-grid" id="recGrid"></div>
+<div class="rec-empty" id="recEmpty" style="display:none">No recordings available on this server yet.</div>
+
+<div class="modal" id="viewerModal" role="dialog" aria-modal="true">
+  <div class="viewer-card">
+    <div class="viewer-head">
+      <h2 id="viewerTitle"></h2>
+      <button id="viewerClose">Close</button>
+    </div>
+    <div class="viewer-body">
+      <video id="viewerVideo" controls playsinline muted loop></video>
+      <div class="viewer-side">
+        <div class="counter-label">Reps so far</div>
+        <div class="big" id="viewerCount">0</div>
+        <div class="note" id="viewerNote"></div>
+        <div class="graph-header"><span id="viewerSigLabel">Signal</span><span class="value" id="viewerTotal"></span></div>
+        <div class="viewer-graph"><canvas id="viewerGraph"></canvas></div>
       </div>
     </div>
   </div>
@@ -440,6 +496,95 @@ btnReset.addEventListener('click', () => {
   counterSub.textContent = 'Hold starting position...';
 });
 
+// ── Recordings library ──
+const recGrid = document.getElementById('recGrid');
+const viewerModal = document.getElementById('viewerModal');
+const viewerVideo = document.getElementById('viewerVideo');
+const viewerCount = document.getElementById('viewerCount');
+const viewerGraph = document.getElementById('viewerGraph');
+let viewerData = null;
+
+async function loadRecordings() {
+  let list = [];
+  try { list = await (await fetch('/api/recordings')).json(); } catch {}
+  document.getElementById('recCount').textContent = list.length ? `${list.length} clip${list.length > 1 ? 's' : ''}` : '';
+  document.getElementById('recEmpty').style.display = list.length ? 'none' : 'block';
+  recGrid.textContent = '';
+  for (const r of list) {
+    const card = document.createElement('button');
+    card.className = 'rec-card';
+    const t = document.createElement('div'); t.className = 't'; t.textContent = r.title;
+    const m = document.createElement('div'); m.className = 'm';
+    const tag = document.createElement('span');
+    tag.className = 'tag ' + r.exercise; tag.textContent = r.exercise === 'pushup' ? 'Push-up' : 'Sit-up';
+    const sz = document.createElement('span'); sz.textContent = r.size_kb + ' KB';
+    m.append(tag, sz);
+    card.append(t, m);
+    card.addEventListener('click', () => openRecording(r));
+    recGrid.append(card);
+  }
+}
+
+async function openRecording(r) {
+  viewerData = null;
+  document.getElementById('viewerTitle').textContent = r.title;
+  viewerCount.textContent = '0';
+  document.getElementById('viewerNote').textContent = 'Loading analysis...';
+  document.getElementById('viewerTotal').textContent = '';
+  viewerVideo.src = '/media/' + encodeURIComponent(r.name);
+  viewerModal.classList.add('open');
+  viewerVideo.play().catch(() => {});
+  try {
+    const a = await (await fetch('/api/recordings/' + encodeURIComponent(r.name))).json();
+    if (!viewerModal.classList.contains('open')) return;
+    if (a.available) {
+      viewerData = a;
+      document.getElementById('viewerNote').textContent = a.note;
+      document.getElementById('viewerSigLabel').textContent = a.signal_label;
+      document.getElementById('viewerTotal').textContent = a.rep_count + ' total';
+    } else {
+      document.getElementById('viewerNote').textContent = 'No pose analysis cached for this clip.';
+    }
+  } catch { document.getElementById('viewerNote').textContent = 'Analysis unavailable.'; }
+  updateViewer();
+}
+
+function updateViewer() {
+  const now = viewerVideo.currentTime || 0;
+  if (viewerData) viewerCount.textContent = viewerData.rep_times.filter(t => t <= now).length;
+  drawViewerGraph(now);
+}
+
+function drawViewerGraph(now) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = viewerGraph.clientWidth, h = viewerGraph.clientHeight;
+  if (w < 10 || h < 10) return;
+  viewerGraph.width = w * dpr; viewerGraph.height = h * dpr;
+  const c = viewerGraph.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+  if (!viewerData || viewerData.signal.length < 2) return;
+  const s = viewerData.signal;
+  const vals = s.map(p => p[1]);
+  const mn = Math.min(...vals) - 5, mx = Math.max(...vals) + 5;
+  const t0 = s[0][0], t1 = s[s.length - 1][0] || 1;
+  const X = t => ((t - t0) / ((t1 - t0) || 1)) * w, Y = v => h - ((v - mn) / ((mx - mn) || 1)) * h;
+  c.strokeStyle = '#4fc3f7'; c.lineWidth = 2; c.beginPath();
+  s.forEach((p, i) => i ? c.lineTo(X(p[0]), Y(p[1])) : c.moveTo(X(p[0]), Y(p[1])));
+  c.stroke();
+  c.fillStyle = '#66bb6a';
+  for (const t of viewerData.rep_times) { c.fillRect(X(t) - 1, 0, 2, h); }
+  c.fillStyle = '#fff'; c.fillRect(X(now) - 1, 0, 2, h);
+}
+
+viewerVideo.addEventListener('timeupdate', updateViewer);
+viewerVideo.addEventListener('seeked', updateViewer);
+function closeViewer() { viewerModal.classList.remove('open'); viewerVideo.pause(); viewerVideo.removeAttribute('src'); viewerVideo.load(); }
+document.getElementById('viewerClose').addEventListener('click', closeViewer);
+viewerModal.addEventListener('click', (e) => { if (e.target === viewerModal) closeViewer(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && viewerModal.classList.contains('open')) closeViewer(); });
+
+loadRecordings();
 connectWS();
 </script>
 </body>
